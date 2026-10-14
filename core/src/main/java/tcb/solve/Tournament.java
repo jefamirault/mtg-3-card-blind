@@ -1,8 +1,10 @@
 package tcb.solve;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -60,10 +62,24 @@ public final class Tournament {
         }
     }
 
+    /** A game being solved right now; {@code solver.progress()} gives its live statistics. */
+    public record Running(int a, int b, int startingPlayer, Solver solver) {
+    }
+
     private Tournament() {
     }
 
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress) {
+        return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet());
+    }
+
+    /**
+     * @param progress one line per finished game
+     * @param running  games currently being solved: each is added when its search starts and
+     *                 removed after its line has gone to {@code progress}. Must be thread-safe.
+     */
+    public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress,
+                              Collection<Running> running) {
         for (DeckList deck : entries) {
             VintageValidator.requireLegal(deck);
         }
@@ -81,8 +97,12 @@ public final class Tournament {
                         final int a = i, b = j, s = start;
                         futures.add(pool.submit(() -> {
                             GameResult r;
+                            Running live = null;
                             try {
-                                r = new Solver(entries.get(a), entries.get(b), s, options).solve();
+                                Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
+                                live = new Running(a, b, s, solver);
+                                running.add(live);
+                                r = solver.solve();
                             } catch (RuntimeException e) {
                                 // Don't lose the whole tournament to one game: score it as an unproven draw.
                                 r = new GameResult(0, 1, 0, 0, false, List.of("solver error: " + e.getMessage()),
@@ -94,6 +114,9 @@ public final class Tournament {
                                     entries.get(s == 0 ? a : b).name(),
                                     r.describe().replace("A ", entries.get(a).name() + " ").replace("B ", entries.get(b).name() + " "),
                                     r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")"));
+                            if (live != null) {
+                                running.remove(live);
+                            }
                             return game;
                         }));
                     }

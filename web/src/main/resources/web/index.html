@@ -96,6 +96,13 @@
   .empty { color: var(--ink-soft); max-width: 50ch; }
   .meter { height: .5rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
   .meter > div { height: 100%; background: var(--action); transition: width .4s ease; }
+  .running { list-style: none; padding: 0; margin: 1.2rem 0 0; display: grid; gap: .7rem; }
+  .running li { background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; padding: .55rem .7rem; }
+  .running .match { font-weight: 600; }
+  .running .stats { display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; font-size: .85rem; color: var(--ink-soft); margin: .15rem 0 .4rem; }
+  .running .meter { height: .35rem; }
+  .running .meter > div { background: var(--ink-soft); }
+  .running .meter.late > div { background: var(--loss); }
   .log { list-style: none; padding: 0; margin: 1rem 0 0; max-height: 24rem; overflow: auto; font-size: .92rem; }
   .log li { padding: .2rem 0; border-bottom: 1px dotted var(--rule); }
 
@@ -270,6 +277,7 @@ function render(status) {
       el("p", {}, `Solved ${done} of ${status.totalGames} games.`),
       el("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(status.totalGames), "aria-valuenow": String(done) },
         Object.assign(el("div"), { style: `width:${status.totalGames ? 100 * done / status.totalGames : 0}%` })),
+      runningGames(status.running || []),
       el("ul", { class: "log" }, ...[...status.progress].reverse().map((p) => el("li", {}, p))));
     return;
   }
@@ -282,6 +290,30 @@ function render(status) {
     return;
   }
   out.replaceChildren(...renderResults(status.results));
+}
+
+const duration = (seconds) => {
+  const s = Math.floor(seconds);
+  if (s < 60) return `${s}s`;
+  return s % 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s / 60}m`;
+};
+
+// Games being solved right now, with live search statistics (refreshed every poll).
+function runningGames(games) {
+  if (!games.length) return null;
+  return el("ul", { class: "running", "aria-label": "Games being solved" }, ...games.map((g) => {
+    const used = Math.round(100 * g.budgetUsed);
+    return el("li", {},
+      el("div", { class: "match" }, `${g.a} vs ${g.b}, ${g.onThePlay} on the play`),
+      el("div", { class: "stats" },
+        el("span", {}, `${g.nodes.toLocaleString()} nodes`),
+        el("span", {}, `${duration(g.seconds)} of ${duration(g.timeBudgetSeconds)}`),
+        el("span", {}, `turn limit ${g.turnLimit || g.maxTurns}`),
+        el("span", {}, g.pass.replace(/\b[AB]\b/g, (p) => p === "A" ? g.a : g.b))),
+      el("div", { class: "meter" + (used >= 75 ? " late" : ""), role: "progressbar", "aria-label": "Search budget used",
+          "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(used) },
+        Object.assign(el("div"), { style: `width:${used}%` })));
+  }));
 }
 
 function cellColor(points) {

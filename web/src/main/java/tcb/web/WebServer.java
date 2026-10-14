@@ -14,7 +14,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
@@ -45,6 +47,7 @@ import tcb.solve.Tournament;
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     private static final int MAX_NAME = 40;
+    private static final Solver.Options OPTIONS = Solver.Options.defaults();
 
     private final Path entriesDir;
     private final int threads;
@@ -53,6 +56,8 @@ public final class WebServer {
     // tournament state, guarded by this
     private String state = "idle"; // idle | running | done | failed
     private final List<String> progress = new CopyOnWriteArrayList<>();
+    private final Set<Tournament.Running> running = ConcurrentHashMap.newKeySet();
+    private List<DeckList> tournamentEntries = List.of();
     private int totalGames;
     private Map<String, Object> results;
     private String error;
@@ -217,10 +222,34 @@ public final class WebServer {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("state", state);
         m.put("progress", progress);
+        m.put("running", runningGames());
         m.put("totalGames", totalGames);
         m.put("results", results);
         m.put("error", error);
         return m;
+    }
+
+    /** Live statistics of the games being solved, longest-running first. */
+    private List<Map<String, Object>> runningGames() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        List<DeckList> entries = tournamentEntries;
+        for (Tournament.Running r : running) {
+            Solver.Progress p = r.solver().progress();
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("a", entries.get(r.a()).name());
+            m.put("b", entries.get(r.b()).name());
+            m.put("onThePlay", entries.get(r.startingPlayer() == 0 ? r.a() : r.b()).name());
+            m.put("nodes", p.nodes());
+            m.put("seconds", p.elapsed().toMillis() / 1000.0);
+            m.put("turnLimit", p.turnLimit());
+            m.put("maxTurns", OPTIONS.maxTurns());
+            m.put("pass", p.pass());
+            m.put("budgetUsed", p.budgetUsed());
+            m.put("timeBudgetSeconds", OPTIONS.timeBudget().toSeconds());
+            out.add(m);
+        }
+        out.sort(Comparator.comparingDouble((Map<String, Object> m) -> (double) m.get("seconds")).reversed());
+        return out;
     }
 
     private void startTournament(HttpExchange ex) throws IOException {
@@ -245,13 +274,15 @@ public final class WebServer {
             }
             state = "running";
             progress.clear();
+            running.clear();
+            tournamentEntries = entries;
             totalGames = entries.size() * (entries.size() - 1);
             results = null;
             error = null;
         }
         Thread runner = new Thread(() -> {
             try {
-                Tournament.Results r = Tournament.run(entries, Solver.Options.defaults(), threads, progress::add);
+                Tournament.Results r = Tournament.run(entries, OPTIONS, threads, progress::add, running);
                 synchronized (this) {
                     results = ResultsJson.toJson(r);
                     state = "done";

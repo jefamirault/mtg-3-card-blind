@@ -95,22 +95,49 @@ public final class Solver {
         }
     }
 
+    /**
+     * A snapshot of a search in progress, for progress displays.
+     *
+     * @param nodes      search nodes so far
+     * @param elapsed    time since the search started
+     * @param turnLimit  turn limit of the current pass (iterative deepening doubles it)
+     * @param pass       what the current pass is trying to prove
+     * @param budgetUsed fraction of the node or time budget used, whichever is larger (0 to 1)
+     */
+    public record Progress(long nodes, Duration elapsed, int turnLimit, String pass, double budgetUsed) {
+    }
+
     private final GameRunner runner;
     private final Options options;
     private final Map<String, Entry> table = new HashMap<>();
     /** Positions on the current search path, for repetition detection. */
     private final Set<String> path = new HashSet<>();
-    private long nodes;
-    private long deadline;
     private boolean sawChance;
+    private long deadline;
+
+    // Read by other threads through progress(); only the solving thread writes them.
+    private volatile long nodes;
+    private volatile long startNanos;
+    private volatile int turnLimit;
+    private volatile String pass = "starting";
 
     public Solver(DeckList a, DeckList b, int startingPlayer, Options options) {
         this.runner = new GameRunner(a, b, startingPlayer);
         this.options = options;
     }
 
+    /** Live statistics of this search; safe to call from any thread while {@link #solve()} runs. */
+    public Progress progress() {
+        long start = startNanos;
+        long elapsed = start == 0 ? 0 : System.nanoTime() - start;
+        long n = nodes;
+        double used = Math.max((double) n / options.nodeBudget(), (double) elapsed / options.timeBudget().toNanos());
+        return new Progress(n, Duration.ofNanos(elapsed), turnLimit, pass, Math.min(1, used));
+    }
+
     public GameResult solve() {
         long start = System.nanoTime();
+        startNanos = start;
         deadline = start + options.timeBudget().toNanos();
         Line best = null;
         int bestLimit = 0;
@@ -134,6 +161,7 @@ public final class Solver {
         if (best == null) {
             return new GameResult(0, 1, 0, 0, false, List.of("(search budget exhausted before any result)"), nodes, elapsed);
         }
+        pass = "replaying the optimal line";
         return new GameResult(best.pWin(), best.pDraw(), best.pLoss(), bestLimit, complete,
                 principalVariation(best.pv(), bestLimit), nodes, elapsed);
     }
@@ -149,11 +177,14 @@ public final class Solver {
         table.clear();
         path.clear();
         sawChance = false;
+        turnLimit = limit;
+        pass = "can A force a win?";
         Line aWins = search(new int[0], new int[0], limit, 0, 1);
         if (!sawChance) {
             if (aWins.value() >= 1) {
                 return aWins;
             }
+            pass = "can B force a win?";
             Line bWins = search(new int[0], new int[0], limit, -1, 0);
             if (bWins.value() <= -1) {
                 return bWins;
@@ -162,11 +193,14 @@ public final class Solver {
             return new Line(0, 0, 1, 0, aWins.pv());
         }
         table.clear();
+        pass = "expected result (random events)";
         return search(new int[0], new int[0], limit, -1, 1);
     }
 
     private Line search(int[] choices, int[] checks, int limit, double alpha, double beta) {
-        if (++nodes > options.nodeBudget() || System.nanoTime() > deadline) {
+        long n = nodes + 1;
+        nodes = n;
+        if (n > options.nodeBudget() || System.nanoTime() > deadline) {
             throw new BudgetExceeded();
         }
         Outcome outcome = runner.run(new DecisionTape(choices, checks, limit));
