@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import forge.ai.AiCache;
 import forge.ai.ComputerUtilAbility;
 import forge.ai.ComputerUtilCard;
 import forge.ai.ComputerUtilCost;
@@ -78,6 +79,7 @@ public class SolverController extends PlayerControllerAi {
 
     @Override
     public List<SpellAbility> chooseSpellAbilityToPlay() {
+        AiCache.clear(); // as Forge's AI does at each priority decision; the AI fallbacks rely on it
         Game game = getGame();
         int turn = game.getPhaseHandler().getTurn();
         tape.checkTurn(turn);

@@ -19,6 +19,8 @@ public final class DecisionTape {
     private final List<String> trace = new ArrayList<>();
     private final Set<String> checkpoints = new HashSet<>();
     private int lastCheckpointTurn = -1;
+    /** Set when the game runs on its own thread and pauses at new decisions instead of stopping. */
+    private Continuation.Handoff handoff;
 
     /**
      * @param choices   option index for each successive branching decision
@@ -28,6 +30,10 @@ public final class DecisionTape {
         this.choices = choices;
         this.checksums = checksums;
         this.turnLimit = turnLimit;
+    }
+
+    void pauseAtNewDecisions(Continuation.Handoff handoff) {
+        this.handoff = handoff;
     }
 
     public int turnLimit() {
@@ -74,6 +80,8 @@ public final class DecisionTape {
 
     /**
      * Picks one of {@code labels}. Single-option decisions are taken without using the tape.
+     * Past the end of the tape, either stops the game ({@link Signals.BranchReached}) or, for a
+     * game started with {@link GameRunner#start}, pauses until the search picks an option.
      */
     public int decide(int player, String kind, List<String> labels, int turn, Supplier<String> position) {
         if (labels.isEmpty()) {
@@ -82,16 +90,26 @@ public final class DecisionTape {
         if (labels.size() == 1) {
             return 0;
         }
+        int choice;
         if (pos >= choices.length) {
-            throw new Signals.BranchReached(new Signals.Branch(player, kind, List.copyOf(labels), position.get(), turn));
+            Signals.Branch branch = new Signals.Branch(player, kind, List.copyOf(labels), position.get(), turn);
+            if (handoff == null) {
+                throw new Signals.BranchReached(branch);
+            }
+            handoff.toSearch(new GameRunner.Outcome(null, branch, List.copyOf(trace), turn, new Continuation(handoff)));
+            choice = handoff.awaitChoice();
+            if (choice >= labels.size()) {
+                throw new IllegalArgumentException("choice " + choice + " out of range for " + labels);
+            }
+        } else {
+            choice = choices[pos];
+            int expected = checksums[pos];
+            if (choice >= labels.size() || (expected != 0 && expected != checksum(labels))) {
+                throw new IllegalStateException("Non-deterministic replay at decision " + pos + " (" + kind
+                        + "): options are now " + labels);
+            }
+            pos++;
         }
-        int choice = choices[pos];
-        int expected = checksums[pos];
-        if (choice >= labels.size() || (expected != 0 && expected != checksum(labels))) {
-            throw new IllegalStateException("Non-deterministic replay at decision " + pos + " (" + kind
-                    + "): options are now " + labels);
-        }
-        pos++;
         String who = player == CHANCE ? "Chance" : player == 0 ? "A" : "B";
         trace.add(who + " " + kind + ": " + labels.get(choice));
         return choice;

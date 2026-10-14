@@ -61,7 +61,8 @@
                         <systemPropertyVariables>
                             <tcb.forgeGuiDir>${maven.multiModuleProjectDirectory}/forge/forge-gui</tcb.forgeGuiDir>
                         </systemPropertyVariables>
-                        <argLine>-Xss512m -Xmx8g</argLine>
+                        <!-- Forge calls System.gc() after every finished game; with parallel solvers that stalls them all -->
+                        <argLine>-Xss512m -Xmx8g -XX:+DisableExplicitGC</argLine>
                     </configuration>
                 </plugin>
             </plugins>

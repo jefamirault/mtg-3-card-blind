@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 import tcb.deck.DeckList;
+import tcb.engine.Continuation;
 import tcb.engine.DecisionTape;
 import tcb.engine.GameRunner;
 import tcb.engine.GameRunner.Outcome;
@@ -179,13 +180,13 @@ public final class Solver {
         sawChance = false;
         turnLimit = limit;
         pass = "can A force a win?";
-        Line aWins = search(new int[0], new int[0], limit, 0, 1);
+        Line aWins = search(new int[0], new int[0], limit, 0, 1, null);
         if (!sawChance) {
             if (aWins.value() >= 1) {
                 return aWins;
             }
             pass = "can B force a win?";
-            Line bWins = search(new int[0], new int[0], limit, -1, 0);
+            Line bWins = search(new int[0], new int[0], limit, -1, 0, null);
             if (bWins.value() <= -1) {
                 return bWins;
             }
@@ -194,47 +195,71 @@ public final class Solver {
         }
         table.clear();
         pass = "expected result (random events)";
-        return search(new int[0], new int[0], limit, -1, 1);
+        return search(new int[0], new int[0], limit, -1, 1, null);
     }
 
-    private Line search(int[] choices, int[] checks, int limit, double alpha, double beta) {
-        long n = nodes + 1;
-        nodes = n;
-        if (n > options.nodeBudget() || System.nanoTime() > deadline) {
-            throw new BudgetExceeded();
-        }
-        Outcome outcome = runner.run(new DecisionTape(choices, checks, limit));
-        if (outcome.isTerminal()) {
-            return Line.of(outcome.value());
-        }
-        Branch branch = outcome.branch();
-        if (branch.player() == DecisionTape.CHANCE) {
-            sawChance = true;
-            return chance(branch, choices, checks, limit);
-        }
-        String position = branch.position();
-        if (position != null && !path.add(position)) {
-            // The same position recurs on this line: the players can loop forever, which is a draw.
-            // (Standard first-repetition rule; a player who can force a win can do so without looping.)
-            return Line.of(0);
-        }
+    /**
+     * @param known the node's outcome if the caller already has it (the parent's paused game,
+     *              resumed); null to replay the game up to the node
+     */
+    private Line search(int[] choices, int[] checks, int limit, double alpha, double beta, Outcome known) {
+        Outcome outcome = known;
         try {
-            return expand(branch, choices, checks, limit, alpha, beta);
+            long n = nodes + 1;
+            nodes = n;
+            if (n > options.nodeBudget() || System.nanoTime() > deadline) {
+                throw new BudgetExceeded();
+            }
+            if (outcome == null) {
+                outcome = runner.start(new DecisionTape(choices, checks, limit));
+            }
+            if (outcome.isTerminal()) {
+                return Line.of(outcome.value());
+            }
+            Branch branch = outcome.branch();
+            if (branch.player() == DecisionTape.CHANCE) {
+                sawChance = true;
+                return chance(outcome, choices, checks, limit);
+            }
+            String position = branch.position();
+            if (position != null && !path.add(position)) {
+                // The same position recurs on this line: the players can loop forever, which is a draw.
+                // (Standard first-repetition rule; a player who can force a win can do so without looping.)
+                return Line.of(0);
+            }
+            try {
+                return expand(outcome, choices, checks, limit, alpha, beta);
+            } finally {
+                if (position != null) {
+                    path.remove(position);
+                }
+            }
         } finally {
-            if (position != null) {
-                path.remove(position);
+            if (outcome != null && outcome.continuation() != null) {
+                outcome.continuation().abandon();
             }
         }
     }
 
+    /**
+     * The outcome of choosing {@code choice} at {@code node}: continues the node's paused game if
+     * it hasn't been used yet, which saves replaying it from turn 1. Null if it has (the child
+     * then replays).
+     */
+    private static Outcome resume(Outcome node, int choice) {
+        Continuation game = node.continuation();
+        return game != null && game.isLive() ? game.resume(choice) : null;
+    }
+
     /** Random event: every outcome equally likely, each searched exactly. */
-    private Line chance(Branch branch, int[] choices, int[] checks, int limit) {
+    private Line chance(Outcome node, int[] choices, int[] checks, int limit) {
+        Branch branch = node.branch();
         int checksum = DecisionTape.checksum(branch.labels());
         int n = branch.labels().size();
         double value = 0, pWin = 0, pDraw = 0, pLoss = 0;
         int[] pv = null;
         for (int i = 0; i < n; i++) {
-            Line child = search(append(choices, i), append(checks, checksum), limit, -1, 1);
+            Line child = search(append(choices, i), append(checks, checksum), limit, -1, 1, resume(node, i));
             value += child.value() / n;
             pWin += child.pWin() / n;
             pDraw += child.pDraw() / n;
@@ -246,7 +271,8 @@ public final class Solver {
         return new Line(value, pWin, pDraw, pLoss, pv);
     }
 
-    private Line expand(Branch branch, int[] choices, int[] checks, int limit, double alpha, double beta) {
+    private Line expand(Outcome node, int[] choices, int[] checks, int limit, double alpha, double beta) {
+        Branch branch = node.branch();
         String key = key(branch);
         double origAlpha = alpha;
         double origBeta = beta;
@@ -272,7 +298,7 @@ public final class Solver {
         for (int k = 0; k < n; k++) {
             // try the transposition table's best move first
             int i = k == 0 ? firstTry : (k <= firstTry ? k - 1 : k);
-            Line child = search(append(choices, i), append(checks, checksum), limit, alpha, beta);
+            Line child = search(append(choices, i), append(checks, checksum), limit, alpha, beta, resume(node, i));
             double v = child.value();
             if (best == null || (maximizing ? v > best.value() : v < best.value())) {
                 best = child.withPv(prepend(i, child.pv()));

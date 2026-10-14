@@ -48,6 +48,36 @@ class DeterminismTest {
         }
     }
 
+    @Test
+    void pausedGamesMatchReplays() {
+        // Continuing a paused game must reach exactly the state a fresh replay of the same choices reaches.
+        for (int a = 0; a < DECKS.length; a++) {
+            for (int b = 0; b < DECKS.length; b++) {
+                if (a != b) {
+                    continueWalk(DECKS[a], DECKS[b], new Random(a * 31L + b));
+                }
+            }
+        }
+    }
+
+    private static void continueWalk(DeckList deckA, DeckList deckB, Random rnd) {
+        GameRunner runner = new GameRunner(deckA, deckB, rnd.nextInt(2));
+        int[] tape = new int[0];
+        Outcome live = runner.start(new DecisionTape(tape, tape, 30));
+        while (true) {
+            Outcome replay = runner.run(new DecisionTape(tape, new int[tape.length], 30));
+            String where = deckA.name() + " vs " + deckB.name() + " tape " + Arrays.toString(tape);
+            assertEquals(replay.trace(), live.trace(), where);
+            assertEquals(replay.result(), live.result(), where);
+            if (replay.isTerminal()) break;
+            assertEquals(replay.branch(), live.branch(), where);
+            int choice = rnd.nextInt(replay.branch().labels().size());
+            tape = Arrays.copyOf(tape, tape.length + 1);
+            tape[tape.length - 1] = choice;
+            live = live.continuation().resume(choice);
+        }
+    }
+
     private static void walk(DeckList deckA, DeckList deckB, Random rnd) {
         GameRunner runner = new GameRunner(deckA, deckB, rnd.nextInt(2));
         for (int walk = 0; walk < 3; walk++) {

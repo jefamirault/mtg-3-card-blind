@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import forge.LobbyPlayer;
+import forge.ai.AiCache;
 import forge.ai.LobbyPlayerAi;
 import forge.deck.Deck;
 import forge.game.Game;
@@ -27,6 +28,7 @@ import tcb.deck.VintageValidator;
 public final class GameRunner {
     /** Seed for Forge's RNG outside chance nodes; replays must be deterministic. */
     static final long SEED = 0x3CB;
+    private static final long GAME_THREAD_STACK = 64L * 1024 * 1024;
 
     private final Deck deckA;
     private final Deck deckB;
@@ -47,8 +49,15 @@ public final class GameRunner {
         DRAW
     }
 
-    /** Either a finished game ({@code result}) or an unexplored decision ({@code branch}). */
-    public record Outcome(Result result, Signals.Branch branch, List<String> trace, int turn) {
+    /**
+     * Either a finished game ({@code result}) or an unexplored decision ({@code branch}). For games
+     * started with {@link #start}, {@code continuation} is the game paused at that decision.
+     */
+    public record Outcome(Result result, Signals.Branch branch, List<String> trace, int turn, Continuation continuation) {
+        public Outcome(Result result, Signals.Branch branch, List<String> trace, int turn) {
+            this(result, branch, trace, turn, null);
+        }
+
         public boolean isTerminal() {
             return result != null;
         }
@@ -63,8 +72,38 @@ public final class GameRunner {
         }
     }
 
+    /**
+     * Like {@link #run}, but plays the game on its own thread. If it reaches an unexplored
+     * decision the game pauses there instead of stopping, and the outcome carries a
+     * {@link Continuation} that the caller must either resume or abandon.
+     */
+    public Outcome start(DecisionTape tape) {
+        Continuation.Handoff handoff = new Continuation.Handoff();
+        tape.pauseAtNewDecisions(handoff);
+        Thread game = new Thread(null, () -> {
+            Object result;
+            try {
+                result = run(tape);
+            } catch (Continuation.Abandoned a) {
+                return;
+            } catch (RuntimeException | Error e) {
+                result = e;
+            }
+            try {
+                handoff.toSearch(result);
+            } catch (Continuation.Abandoned a) {
+                // interrupted while handing over the result; nobody is waiting
+            }
+        }, "tcb-game", GAME_THREAD_STACK);
+        game.setDaemon(true);
+        game.start();
+        return handoff.fromGame();
+    }
+
+    /** Plays the game on the calling thread, replaying {@code tape}, until it ends or reaches a new decision. */
     public Outcome run(DecisionTape tape) {
         resetIds();
+        AiCache.clear();
         ChanceRandom random = new ChanceRandom(tape, SEED);
         MyRandom.setRandomDirect(random);
 
