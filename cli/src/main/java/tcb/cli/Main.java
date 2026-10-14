@@ -52,6 +52,9 @@ public final class Main {
         @Option(names = "--exact-turns", description = "Make the transposition table turn-aware: slower, but exact for games decided near the turn limit.")
         boolean exactTurns;
 
+        @Option(names = "--exhaustive", description = "Branch on every option: don't merge options that only swap identical cards or skip priority windows that repeat earlier ones. Slower; for checking results.")
+        boolean exhaustive;
+
         @Option(names = "--nodes", defaultValue = "2000000", description = "Max search nodes per game. Default: ${DEFAULT-VALUE}")
         long nodes;
 
@@ -59,7 +62,7 @@ public final class Main {
         String time;
 
         Solver.Options toOptions() {
-            return new Solver.Options(maxTurns, firstTurns == null ? maxTurns : firstTurns, nodes, parseDuration(time), exactTurns);
+            return new Solver.Options(maxTurns, firstTurns == null ? maxTurns : firstTurns, nodes, parseDuration(time), exactTurns, exhaustive);
         }
     }
 

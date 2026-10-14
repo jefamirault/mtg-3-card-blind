@@ -37,10 +37,22 @@ public final class Solver {
      * @param exactTurns     key the transposition table on (position, turn) instead of position
      *                       alone. Turn-free keys merge "do it now" with "do it a turn later",
      *                       which is much faster, but can misjudge games decided near the limit.
+     * @param exhaustive     branch on every option: don't merge options that only swap identical
+     *                       cards, and don't skip priority windows that repeat earlier ones. Slower;
+     *                       for checking that those reductions don't change results.
      */
-    public record Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns) {
+    public record Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
+                          boolean exhaustive) {
+        public Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns) {
+            this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, false);
+        }
+
         public static Options defaults() {
             return new Options(50, 50, 2_000_000, Duration.ofMinutes(10), false);
+        }
+
+        public Options withExhaustive(boolean exhaustive) {
+            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive);
         }
     }
 
@@ -112,6 +124,11 @@ public final class Solver {
     private final GameRunner runner;
     private final Options options;
     private final Map<String, Entry> table = new HashMap<>();
+    /**
+     * Best move found at each position, kept when the table is cleared for a new turn limit or
+     * for the expectimax pass: a good first guess there too.
+     */
+    private final Map<String, Integer> bestMoves = new HashMap<>();
     /** Positions on the current search path, for repetition detection. */
     private final Set<String> path = new HashSet<>();
     private boolean sawChance;
@@ -124,7 +141,7 @@ public final class Solver {
     private volatile String pass = "starting";
 
     public Solver(DeckList a, DeckList b, int startingPlayer, Options options) {
-        this.runner = new GameRunner(a, b, startingPlayer);
+        this.runner = new GameRunner(a, b, startingPlayer, options.exhaustive());
         this.options = options;
     }
 
@@ -276,7 +293,7 @@ public final class Solver {
         String key = key(branch);
         double origAlpha = alpha;
         double origBeta = beta;
-        int firstTry = 0;
+        int firstTry = -1;
         if (key != null) {
             Entry e = table.get(key);
             if (e != null) {
@@ -287,16 +304,15 @@ public final class Solver {
                     return e.line().withPv(new int[] {e.best()});
                 }
                 firstTry = e.best();
+            } else {
+                firstTry = bestMoves.getOrDefault(key, -1);
             }
         }
 
         boolean maximizing = branch.player() == 0;
-        int n = branch.labels().size();
         Line best = null;
         int bestIndex = -1;
-        for (int k = 0; k < n; k++) {
-            // try the transposition table's best move first
-            int i = k == 0 ? firstTry : (k <= firstTry ? k - 1 : k);
+        for (int i : moveOrder(branch.labels().size(), firstTry)) {
             Line child = search(append(steps, branch.step(i)), limit, alpha, beta, resume(node, i));
             double v = child.value();
             if (best == null || (maximizing ? v > best.value() : v < best.value())) {
@@ -316,8 +332,29 @@ public final class Solver {
             double v = best.value();
             Bound bound = v <= origAlpha ? Bound.UPPER : v >= origBeta ? Bound.LOWER : Bound.EXACT;
             table.put(key, new Entry(best, bound, bestIndex));
+            bestMoves.put(key, bestIndex);
         }
         return best;
+    }
+
+    /**
+     * The order to try options in: the remembered best move, then the rest in the controller's
+     * order (actions before passing, bigger attacks first). Killer moves (the option that last
+     * caused a cutoff at the same depth) were tried too, and searched 2-3x more nodes: decision
+     * depths don't line up across lines, so they're poor guesses here.
+     */
+    private static int[] moveOrder(int n, int best) {
+        int[] order = new int[n];
+        int k = 0;
+        if (best >= 0 && best < n) {
+            order[k++] = best;
+        }
+        for (int i = 0; i < n; i++) {
+            if (i != best) {
+                order[k++] = i;
+            }
+        }
+        return order;
     }
 
     /** Replays the best line, extending it through transposition-table moves, and returns its trace. */

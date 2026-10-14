@@ -44,11 +44,19 @@ public class SolverController extends PlayerControllerAi {
 
     private final DecisionTape tape;
     private final int startingPlayer;
+    /** Don't merge interchangeable options or skip repeated windows (for checking those reductions). */
+    private final boolean exhaustive;
 
-    public SolverController(Game game, Player player, forge.LobbyPlayer lobbyPlayer, DecisionTape tape, int startingPlayer) {
+    public SolverController(Game game, Player player, forge.LobbyPlayer lobbyPlayer, DecisionTape tape, int startingPlayer,
+                            boolean exhaustive) {
         super(game, player, lobbyPlayer);
         this.tape = tape;
         this.startingPlayer = startingPlayer;
+        this.exhaustive = exhaustive;
+    }
+
+    private Equivalence equivalence() {
+        return exhaustive ? Equivalence.none(getGame()) : new Equivalence(getGame());
     }
 
     private int me() {
@@ -86,24 +94,47 @@ public class SolverController extends PlayerControllerAi {
         if (game.getPhaseHandler().is(PhaseType.MAIN1, player) && game.getStack().isEmpty() && tape.checkpointDue(turn)) {
             tape.checkpoint(position("checkpoint", List.of()));
         }
+        PhaseType previous = tape.notePriority(turn, game.getPhaseHandler().getPhase());
+        if (!exhaustive && game.getStack().isEmpty() && repeatsEarlierWindow(previous)) {
+            return null;
+        }
         if (tape.replaysPass(me())) {
             return null;
         }
 
-        Map<String, PlayOption> options = new LinkedHashMap<>();
+        // Options that differ only in which of several interchangeable cards they use (e.g. which
+        // of three identical Memnites to Putrefy) are one option: keyed by equivalence, not label.
+        Equivalence eq = equivalence();
+        Map<String, PlayOption> byKey = new LinkedHashMap<>();
+        Map<String, String> labelByKey = new LinkedHashMap<>();
         for (SpellAbility sa : candidateAbilities()) {
             String base = describe(sa);
+            String baseKey = eq.key(sa.getHostCard()) + "|" + sa.getDescription() + "|" + base;
             if (TargetEnumerator.targetingParts(sa).isEmpty()) {
-                options.putIfAbsent(base, new PlayOption(sa, null));
+                if (byKey.putIfAbsent(baseKey, new PlayOption(sa, null)) == null) {
+                    labelByKey.put(baseKey, base);
+                }
                 continue;
             }
             for (List<List<GameObject>> targets : TargetEnumerator.enumerate(sa, MAX_OPTIONS)) {
                 TargetEnumerator.apply(sa, targets);
                 if (sa.isTargetNumberValid() && ComputerUtilCost.canPayCost(sa, player, false)) {
-                    options.putIfAbsent(base + " -> " + TargetEnumerator.describe(targets), new PlayOption(sa, targets));
+                    String key = baseKey + " -> " + TargetEnumerator.key(targets, eq);
+                    if (byKey.putIfAbsent(key, new PlayOption(sa, targets)) == null) {
+                        labelByKey.put(key, base + " -> " + TargetEnumerator.describe(targets));
+                    }
                 }
             }
             TargetEnumerator.clear(TargetEnumerator.targetingParts(sa));
+        }
+        // Distinct options need distinct labels: tell same-named sources apart by card id.
+        Map<String, PlayOption> options = new LinkedHashMap<>();
+        for (Map.Entry<String, PlayOption> e : byKey.entrySet()) {
+            String label = labelByKey.get(e.getKey());
+            if (options.containsKey(label)) {
+                label += " (#" + e.getValue().sa().getHostCard().getId() + ")";
+            }
+            options.put(label, e.getValue());
         }
 
         List<String> labels = new ArrayList<>(options.keySet());
@@ -118,6 +149,27 @@ public class SolverController extends PlayerControllerAi {
             TargetEnumerator.apply(option.sa(), option.targets());
         }
         return List.of(option.sa());
+    }
+
+    /**
+     * True for priority windows that offer nothing the previous window in the turn didn't, so
+     * both players pass without branching:
+     * <ul>
+     * <li>the draw step when nobody drew (the library was empty): it's the upkeep again;</li>
+     * <li>the end of combat step right after the combat damage step: nothing happens in
+     *     between (end-of-combat triggers would be on the stack, and creatures stay in combat
+     *     until the step ends).</li>
+     * </ul>
+     * Anything done here could have been done, with the same result, in that earlier window.
+     */
+    private boolean repeatsEarlierWindow(PhaseType previous) {
+        Game game = getGame();
+        PhaseType phase = game.getPhaseHandler().getPhase();
+        if (phase == PhaseType.DRAW) {
+            return previous == PhaseType.UPKEEP
+                    && game.getPlayers().stream().allMatch(p -> p.numDrawnThisDrawStep() == 0);
+        }
+        return phase == PhaseType.COMBAT_END && previous == PhaseType.COMBAT_DAMAGE;
     }
 
     /** Every non-mana spell/ability the player could legally start playing right now. */
@@ -179,6 +231,11 @@ public class SolverController extends PlayerControllerAi {
         if (creatures.isEmpty() || defenders.isEmpty()) {
             return;
         }
+        // Keys before trying assignments on the combat: options that only swap interchangeable
+        // creatures are merged.
+        Equivalence eq = equivalence();
+        List<String> creatureKeys = keys(creatures, eq);
+        List<String> defenderKeys = keys(defenders, eq);
         // assignment[i] = 0 (doesn't attack) or 1 + index into defenders
         List<int[]> assignments = new ArrayList<>();
         int radix = defenders.size() + 1;
@@ -205,6 +262,7 @@ public class SolverController extends PlayerControllerAi {
                 assignments.add(a);
             }
         }
+        assignments = distinct(assignments, creatureKeys, defenderKeys);
         // Try the biggest attacks first; "no attack" last.
         assignments.sort(Comparator.comparingInt(SolverController::attackerCount).reversed());
         List<String> labels = new ArrayList<>();
@@ -216,6 +274,43 @@ public class SolverController extends PlayerControllerAi {
         }
         int[] chosen = assignments.get(decide("attack", labels, getGame().getStack().isEmpty()));
         applyAttack(combat, creatures, defenders, chosen);
+    }
+
+    private static List<String> keys(List<? extends GameObject> objects, Equivalence eq) {
+        List<String> keys = new ArrayList<>();
+        for (GameObject o : objects) {
+            keys.add(eq.key(o));
+        }
+        return keys;
+    }
+
+    /**
+     * Drops assignments that only swap interchangeable objects. {@code a[i]} sends creature i to
+     * target {@code a[i] - 1} (0 = not assigned); creatures and targets with equal keys are
+     * interchangeable.
+     */
+    private static List<int[]> distinct(List<int[]> assignments, List<String> creatureKeys, List<String> targetKeys) {
+        Map<String, int[]> seen = new LinkedHashMap<>();
+        for (int[] a : assignments) {
+            // For each target: the sorted creatures sent to it. Then sort those groups, so two
+            // identical targets with swapped groups also compare equal.
+            List<String> groups = new ArrayList<>();
+            for (int t = 0; t < targetKeys.size(); t++) {
+                List<String> sent = new ArrayList<>();
+                for (int i = 0; i < a.length; i++) {
+                    if (a[i] == t + 1) {
+                        sent.add(creatureKeys.get(i));
+                    }
+                }
+                if (!sent.isEmpty()) {
+                    sent.sort(null);
+                    groups.add(targetKeys.get(t) + " <- " + String.join(" + ", sent));
+                }
+            }
+            groups.sort(null);
+            seen.putIfAbsent(String.join(" | ", groups), a);
+        }
+        return new ArrayList<>(seen.values());
     }
 
     private static int attackerCount(int[] a) {
@@ -274,6 +369,11 @@ public class SolverController extends PlayerControllerAi {
             super.declareBlockers(defender, combat);
             return;
         }
+        // Blocking either of two identical unblocked attackers with either of two identical
+        // blockers is one choice.
+        Equivalence eq = equivalence();
+        List<String> blockerKeys = keys(blockers, eq);
+        List<String> attackerKeys = keys(attackers, eq);
         List<int[]> assignments = new ArrayList<>();
         for (int code = 0; code < total; code++) {
             int[] b = new int[blockers.size()];
@@ -290,6 +390,7 @@ public class SolverController extends PlayerControllerAi {
                 assignments.add(b);
             }
         }
+        assignments = distinct(assignments, blockerKeys, attackerKeys);
         // Most blockers first; "No blocks" last.
         assignments.sort(Comparator.comparingInt(SolverController::attackerCount).reversed());
         List<String> labels = new ArrayList<>();
@@ -394,7 +495,13 @@ public class SolverController extends PlayerControllerAi {
         if (optionList.isEmpty() || optionList.size() > MAX_OPTIONS) {
             return super.chooseSingleEntityForEffect(optionList, delayedReveal, sa, title, isOptional, targetedPlayer, params);
         }
-        List<T> items = new ArrayList<>(optionList);
+        // One option per group of interchangeable items.
+        Equivalence eq = equivalence();
+        Map<String, T> distinct = new LinkedHashMap<>();
+        for (T item : optionList) {
+            distinct.putIfAbsent(eq.key(item), item);
+        }
+        List<T> items = new ArrayList<>(distinct.values());
         List<String> labels = new ArrayList<>();
         for (T item : items) {
             labels.add(title + ": " + item);
@@ -414,23 +521,30 @@ public class SolverController extends PlayerControllerAi {
         if (cards.size() > 12 || lo > hi) {
             return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
         }
-        List<CardCollection> subsets = new ArrayList<>();
+        // Subsets that only swap interchangeable cards are one option.
+        Equivalence eq = equivalence();
+        List<String> keys = keys(cards, eq);
+        Map<String, CardCollection> distinct = new LinkedHashMap<>();
         for (int mask = 0; mask < (1 << cards.size()); mask++) {
             int size = Integer.bitCount(mask);
             if (size < lo || size > hi) {
                 continue;
             }
             CardCollection subset = new CardCollection();
+            List<String> subsetKeys = new ArrayList<>();
             for (int i = 0; i < cards.size(); i++) {
                 if ((mask & (1 << i)) != 0) {
                     subset.add(cards.get(i));
+                    subsetKeys.add(keys.get(i));
                 }
             }
-            subsets.add(subset);
-            if (subsets.size() > MAX_OPTIONS) {
+            subsetKeys.sort(null);
+            distinct.putIfAbsent(String.join(" + ", subsetKeys), subset);
+            if (distinct.size() > MAX_OPTIONS) {
                 return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
             }
         }
+        List<CardCollection> subsets = new ArrayList<>(distinct.values());
         List<String> labels = new ArrayList<>();
         for (CardCollection subset : subsets) {
             labels.add(title + ": " + (subset.isEmpty() ? "(none)" : subset.toString()));
@@ -494,6 +608,13 @@ public class SolverController extends PlayerControllerAi {
               .append(",lands=").append(p.getLandsPlayedThisTurn())
               .append(",gy=").append(p.getCardsIn(ZoneType.Graveyard).size());
         }
+        // The dump leaves out temporary changes (P/T, types, keywords); add each permanent's state.
+        List<String> permanents = new ArrayList<>();
+        for (Card c : game.getCardsIn(ZoneType.Battlefield)) {
+            permanents.add(Equivalence.state(game, c));
+        }
+        permanents.sort(null);
+        sb.append("|permanents:").append(String.join(";", permanents));
         Combat combat = game.getPhaseHandler().getCombat();
         if (combat != null) {
             sb.append("|combat:");

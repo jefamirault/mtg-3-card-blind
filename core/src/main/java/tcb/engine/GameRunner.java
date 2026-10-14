@@ -33,13 +33,20 @@ public final class GameRunner {
     private final Deck deckA;
     private final Deck deckB;
     private final int startingPlayer;
+    private final boolean exhaustive;
 
     /** @param startingPlayer 0 if deck A is on the play, 1 if deck B is. */
     public GameRunner(DeckList a, DeckList b, int startingPlayer) {
+        this(a, b, startingPlayer, false);
+    }
+
+    /** @param exhaustive branch on every option (see {@link SolverController}) */
+    public GameRunner(DeckList a, DeckList b, int startingPlayer, boolean exhaustive) {
         ForgeEnv.init();
         this.deckA = VintageValidator.toForgeDeck(a);
         this.deckB = VintageValidator.toForgeDeck(b);
         this.startingPlayer = startingPlayer;
+        this.exhaustive = exhaustive;
     }
 
     public enum Result {
@@ -157,7 +164,7 @@ public final class GameRunner {
     private RegisteredPlayer register(Deck deck, String name, DecisionTape tape) {
         RegisteredPlayer rp = new RegisteredPlayer(deck);
         rp.setStartingHand(VintageValidator.DECK_SIZE);
-        rp.setPlayer(new SolverLobbyPlayer(name, tape, startingPlayer));
+        rp.setPlayer(new SolverLobbyPlayer(name, tape, startingPlayer, exhaustive));
         return rp;
     }
 
@@ -165,17 +172,19 @@ public final class GameRunner {
     private static final class SolverLobbyPlayer extends LobbyPlayerAi {
         private final DecisionTape tape;
         private final int startingPlayer;
+        private final boolean exhaustive;
 
-        SolverLobbyPlayer(String name, DecisionTape tape, int startingPlayer) {
+        SolverLobbyPlayer(String name, DecisionTape tape, int startingPlayer, boolean exhaustive) {
             super(name, null);
             this.tape = tape;
             this.startingPlayer = startingPlayer;
+            this.exhaustive = exhaustive;
         }
 
         @Override
         public Player createIngamePlayer(Game game, int id) {
             Player p = new Player(getName(), game, id);
-            p.setFirstController(new SolverController(game, p, (LobbyPlayer) this, tape, startingPlayer));
+            p.setFirstController(new SolverController(game, p, (LobbyPlayer) this, tape, startingPlayer, exhaustive));
             return p;
         }
     }

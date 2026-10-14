@@ -1,6 +1,7 @@
 package tcb.engine;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import forge.game.GameObject;
@@ -143,6 +144,20 @@ final class TargetEnumerator {
         for (SpellAbility part : parts) {
             part.resetTargets();
         }
+    }
+
+    /** Equal keys mean the assignments are interchangeable: the same targets up to {@link Equivalence}. */
+    static String key(List<List<GameObject>> assignment, Equivalence eq) {
+        List<String> parts = new ArrayList<>();
+        for (List<GameObject> targets : assignment) {
+            List<String> keys = new ArrayList<>();
+            for (GameObject o : targets) {
+                keys.add(eq.key(o));
+            }
+            Collections.sort(keys);
+            parts.add(String.join(" & ", keys));
+        }
+        return String.join("; ", parts);
     }
 
     static String describe(List<List<GameObject>> assignment) {

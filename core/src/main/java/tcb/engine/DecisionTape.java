@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import forge.game.phase.PhaseType;
+
 /**
  * Feeds pre-recorded choices to the solver controllers while a game is replayed. When the tape
  * runs out at a real decision (two or more options) the game is interrupted with
@@ -33,6 +35,9 @@ public final class DecisionTape {
     private final List<String> trace = new ArrayList<>();
     private final Set<String> checkpoints = new HashSet<>();
     private int lastCheckpointTurn = -1;
+    private int priorityTurn = -1;
+    private PhaseType priorityPhase;
+    private PhaseType previousPriorityPhase;
     /** Set when the game runs on its own thread and pauses at new decisions instead of stopping. */
     private Continuation.Handoff handoff;
 
@@ -78,6 +83,23 @@ public final class DecisionTape {
             labels.add("random outcome " + i + " of " + outcomes);
         }
         return decide(CHANCE, "chance", labels, turn, () -> null);
+    }
+
+    /**
+     * Records a priority decision in {@code phase} and returns the phase of the previous window
+     * this turn: the phase of the last earlier priority decision in a different phase, or null.
+     */
+    PhaseType notePriority(int turn, PhaseType phase) {
+        if (turn != priorityTurn) {
+            priorityTurn = turn;
+            priorityPhase = null;
+            previousPriorityPhase = null;
+        }
+        if (phase != priorityPhase) {
+            previousPriorityPhase = priorityPhase;
+            priorityPhase = phase;
+        }
+        return previousPriorityPhase;
     }
 
     /** True the first time it's called in a given turn. */

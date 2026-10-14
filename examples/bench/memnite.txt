@@ -1,0 +1,4 @@
+# Three identical creatures: tests merging of equivalent attacks, blocks and targets
+Memnite
+Memnite
+Memnite
