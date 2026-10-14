@@ -1,0 +1,5 @@
+target/
+*.log
+results*.json
+.claude/
+entries/

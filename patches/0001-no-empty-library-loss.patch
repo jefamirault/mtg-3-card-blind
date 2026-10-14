@@ -1,0 +1,40 @@
+diff --git a/forge-game/src/main/java/forge/game/GameRules.java b/forge-game/src/main/java/forge/game/GameRules.java
+index 6ed98858..596f5f3c 100644
+--- a/forge-game/src/main/java/forge/game/GameRules.java
++++ b/forge-game/src/main/java/forge/game/GameRules.java
+@@ -16,6 +16,7 @@ public class GameRules {
+     private boolean AISideboardingEnabled = false;
+     private boolean sideboardForAI = false;
+     private boolean allowCheatShuffle = false;
++    private boolean noEmptyLibraryLoss = false;
+     private final Set<GameType> appliedVariants = EnumSet.noneOf(GameType.class);
+     private int simTimeout = 120;
+ 
+@@ -97,6 +98,14 @@ public class GameRules {
+         AISideboardingEnabled = aiSideboarding;
+     }
+ 
++    /** 3 Card Blind: drawing from an empty library does not lose the game (704.5b disabled). */
++    public boolean isNoEmptyLibraryLoss() {
++        return noEmptyLibraryLoss;
++    }
++    public void setNoEmptyLibraryLoss(final boolean noEmptyLibraryLoss) {
++        this.noEmptyLibraryLoss = noEmptyLibraryLoss;
++    }
++
+     public boolean isAllowCheatShuffle() {
+         return allowCheatShuffle;
+     }
+diff --git a/forge-game/src/main/java/forge/game/player/Player.java b/forge-game/src/main/java/forge/game/player/Player.java
+index 26dc9f81..5c0fc259 100644
+--- a/forge-game/src/main/java/forge/game/player/Player.java
++++ b/forge-game/src/main/java/forge/game/player/Player.java
+@@ -2043,7 +2043,7 @@ public class Player extends GameEntity implements Comparable<Player> {
+         if (triedToDrawFromEmptyLibrary) {
+             triedToDrawFromEmptyLibrary = false; // one-shot check
+             // Mine, Mine, Mine! prevents decking
+-            if (loseConditionMet(GameLossReason.Milled, null)) {
++            if (!game.getRules().isNoEmptyLibraryLoss() && loseConditionMet(GameLossReason.Milled, null)) {
+                 return true;
+             }
+         }

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3 Card Blind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #E7EAF0;
+    --ink: #17202B;
+    --ink-soft: #4A5566;
+    --stock: #FBFBF9;
+    --rule: #C4CAD4;
+    --action: #2B4FBF;
+    --win: #2E7A55;
+    --draw: #8C929C;
+    --loss: #B03B3B;
+    --card-w: 4.4rem;
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 17px; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+  }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+
+  header {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
+    padding: 2rem clamp(1rem, 4vw, 3rem) 1.25rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h1 { margin: 0; font-size: 2.6rem; line-height: 1; font-weight: 700; letter-spacing: -0.02em; }
+  header p { margin: .4rem 0 0; color: var(--ink-soft); max-width: 46ch; }
+
+  .primary {
+    background: var(--action); color: #fff; border: 0; border-radius: 3px;
+    padding: .6rem 1.1rem; font-weight: 600; cursor: pointer;
+  }
+  .primary:disabled { background: var(--draw); cursor: not-allowed; }
+
+  main {
+    display: grid; grid-template-columns: minmax(18rem, 25rem) 1fr; gap: clamp(1.5rem, 4vw, 3.5rem);
+    padding: 1.75rem clamp(1rem, 4vw, 3rem) 4rem;
+  }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 1.35rem; margin: 0 0 .9rem; font-weight: 600; }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; font-weight: 600; }
+
+  /* --- entry form --- */
+  form { display: grid; gap: .55rem; margin-bottom: 2rem; }
+  label { font-size: .85rem; color: var(--ink-soft); }
+  input[type=text] {
+    width: 100%; padding: .45rem .6rem; background: var(--stock);
+    border: 1px solid var(--rule); border-radius: 3px;
+  }
+  .slots { display: grid; gap: .4rem; }
+  .problems { margin: 0; padding-left: 1.1rem; color: var(--loss); font-size: .9rem; }
+  form .primary { justify-self: start; margin-top: .3rem; }
+
+  /* --- entries as hands of three --- */
+  .entries { list-style: none; margin: 0; padding: 0; }
+  .entry {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .9rem;
+    padding: .9rem 0; border-top: 1px solid var(--rule);
+  }
+  .entry-name { font-weight: 600; }
+  .entry-note { font-size: .85rem; color: var(--loss); }
+  .remove {
+    border: 0; background: none; color: var(--ink-soft); cursor: pointer; padding: .2rem .4rem; font-size: .9rem;
+  }
+  .remove:hover { color: var(--loss); }
+  .hand { display: flex; padding-left: 1.2rem; }
+  .card {
+    width: var(--card-w); aspect-ratio: 63 / 88; margin-left: -.8rem;
+    background: var(--stock); border: 1px solid #9AA3B1; border-radius: 6px;
+    padding: .3rem .32rem; font-size: .62rem; line-height: 1.15; font-weight: 600;
+    box-shadow: 0 1px 0 rgba(23, 32, 43, .18);
+    overflow: hidden; hyphens: auto;
+    transform-origin: 50% 120%;
+  }
+  .card:nth-child(1) { transform: rotate(-7deg); }
+  .card:nth-child(3) { transform: rotate(7deg); }
+  .card-name { display: block; border-bottom: 1px solid var(--rule); padding-bottom: .2rem; }
+  .entry.illegal .card { border-style: dashed; }
+
+  /* --- results --- */
+  .empty { color: var(--ink-soft); max-width: 50ch; }
+  .meter { height: .5rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+  .meter > div { height: 100%; background: var(--action); transition: width .4s ease; }
+  .log { list-style: none; padding: 0; margin: 1rem 0 0; max-height: 24rem; overflow: auto; font-size: .92rem; }
+  .log li { padding: .2rem 0; border-bottom: 1px dotted var(--rule); }
+
+  .standings { list-style: none; margin: 0; padding: 0; }
+  .standings li {
+    display: grid; grid-template-columns: 2.2rem 1fr auto; gap: .8rem; align-items: baseline;
+    padding: .5rem 0; border-bottom: 1px solid var(--rule);
+  }
+  .rank { font-weight: 700; font-size: 1.25rem; color: var(--ink-soft); }
+  .standings li:first-child .rank, .standings li:first-child .pts { color: var(--ink); }
+  .standings li:first-child .standing-name { font-size: 1.3rem; }
+  .standing-name { font-weight: 600; }
+  .standing-cards { display: block; font-size: .85rem; color: var(--ink-soft); }
+  .pts { font-weight: 700; font-size: 1.25rem; text-align: right; }
+  .record { display: block; font-size: .8rem; font-weight: 400; color: var(--ink-soft); }
+
+  .matrix-wrap { overflow-x: auto; }
+  table.matrix { border-collapse: collapse; font-size: .9rem; }
+  .matrix th, .matrix td { padding: .35rem .5rem; text-align: center; }
+  .matrix th { font-weight: 500; color: var(--ink-soft); }
+  .matrix th[scope=row] { text-align: right; color: var(--ink); white-space: nowrap; }
+  .matrix td { min-width: 2.6rem; color: #fff; font-weight: 600; border: 2px solid var(--paper); }
+  .matrix td.self { background: none; color: var(--rule); }
+  .caption { font-size: .85rem; color: var(--ink-soft); margin: .5rem 0 0; max-width: 60ch; }
+
+  details { border-bottom: 1px solid var(--rule); }
+  summary { cursor: pointer; padding: .5rem 0; display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+  summary::marker { color: var(--ink-soft); }
+  .verdict { font-weight: 600; }
+  .verdict.win { color: var(--win); } .verdict.loss { color: var(--loss); } .verdict.draw { color: var(--ink-soft); }
+  .unproven { font-size: .8rem; color: var(--loss); }
+  ol.line { margin: 0 0 .8rem; padding-left: 1.6rem; font-size: .9rem; color: var(--ink-soft); }
+  ol.line li.end { list-style: none; color: var(--ink); font-weight: 600; margin-left: -1.6rem; }
+
+  @media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>3 Card Blind</h1>
+    <p>Each player picks three Vintage-legal cards. Every matchup is solved with perfect play on both sides, so the best deck wins.</p>
+  </div>
+  <button class="primary" id="run" type="button">Run tournament</button>
+</header>
+
+<main>
+  <section aria-labelledby="entries-h">
+    <h2 id="entries-h">Entries</h2>
+    <form id="add" autocomplete="off">
+      <label for="name">Entry name</label>
+      <input type="text" id="name" name="name" maxlength="40" required>
+      <label for="c1">Cards</label>
+      <div class="slots">
+        <input type="text" id="c1" list="card-names" aria-label="First card" required>
+        <input type="text" id="c2" list="card-names" aria-label="Second card" required>
+        <input type="text" id="c3" list="card-names" aria-label="Third card" required>
+      </div>
+      <datalist id="card-names"></datalist>
+      <ul class="problems" id="add-problems" aria-live="polite"></ul>
+      <button class="primary" type="submit">Add entry</button>
+    </form>
+    <ul class="entries" id="entries"></ul>
+  </section>
+
+  <section aria-labelledby="results-h">
+    <h2 id="results-h">Results</h2>
+    <ul class="problems" id="run-problems" aria-live="polite"></ul>
+    <div id="results"></div>
+  </section>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) node.append(c);
+  return node;
+};
+const fmt = (x) => Math.abs(x - Math.round(x)) < 1e-9 ? String(Math.round(x)) : x.toFixed(1);
+const showProblems = (target, problems) => {
+  target.replaceChildren(...(problems || []).map((p) => el("li", {}, p)));
+};
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data };
+}
+
+// ---- card name suggestions
+let suggestTimer;
+for (const input of document.querySelectorAll(".slots input")) {
+  input.addEventListener("input", () => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(async () => {
+      if (input.value.trim().length < 2) return;
+      const { data } = await api("GET", "/api/cards?q=" + encodeURIComponent(input.value));
+      $("#card-names").replaceChildren(...(data || []).map((n) => el("option", { value: n })));
+    }, 150);
+  });
+}
+
+// ---- entries
+function hand(cards) {
+  return el("div", { class: "hand", "aria-label": cards.join(", ") },
+    ...cards.map((c) => el("div", { class: "card" }, el("span", { class: "card-name" }, c))));
+}
+
+async function loadEntries() {
+  const { data } = await api("GET", "/api/entries");
+  const list = $("#entries");
+  if (!data.length) {
+    list.replaceChildren(el("li", { class: "empty" }, "No entries yet. Add the first one above."));
+    return;
+  }
+  list.replaceChildren(...data.map((e) => {
+    const illegal = e.problems.length > 0;
+    const remove = el("button", { class: "remove", type: "button", "aria-label": "Remove " + e.name }, "Remove");
+    remove.addEventListener("click", async () => {
+      await api("DELETE", "/api/entries/" + encodeURIComponent(e.name));
+      loadEntries();
+    });
+    return el("li", { class: "entry" + (illegal ? " illegal" : "") },
+      hand(e.cards),
+      el("div", {}, el("div", { class: "entry-name" }, e.name),
+        illegal ? el("div", { class: "entry-note" }, e.problems.join("; ")) : null),
+      remove);
+  }));
+}
+
+$("#add").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const cards = ["#c1", "#c2", "#c3"].map((s) => $(s).value.trim());
+  const { ok, data } = await api("POST", "/api/entries", { name: $("#name").value.trim(), cards });
+  if (!ok) { showProblems($("#add-problems"), data.problems || [data.error]); return; }
+  showProblems($("#add-problems"), []);
+  ev.target.reset();
+  $("#name").focus();
+  loadEntries();
+});
+
+// ---- tournament
+$("#run").addEventListener("click", async () => {
+  const { ok, data } = await api("POST", "/api/tournament");
+  showProblems($("#run-problems"), ok ? [] : data.problems || [data.error]);
+  if (ok) poll();
+});
+
+let pollTimer;
+async function poll() {
+  clearTimeout(pollTimer);
+  const { data } = await api("GET", "/api/tournament");
+  render(data);
+  if (data.state === "running") pollTimer = setTimeout(poll, 2000);
+}
+
+function render(status) {
+  const out = $("#results");
+  $("#run").disabled = status.state === "running";
+  $("#run").textContent = status.state === "running" ? "Solving…" : "Run tournament";
+  if (status.state === "running") {
+    const done = status.progress.length;
+    out.replaceChildren(
+      el("p", {}, `Solved ${done} of ${status.totalGames} games.`),
+      el("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(status.totalGames), "aria-valuenow": String(done) },
+        Object.assign(el("div"), { style: `width:${status.totalGames ? 100 * done / status.totalGames : 0}%` })),
+      el("ul", { class: "log" }, ...[...status.progress].reverse().map((p) => el("li", {}, p))));
+    return;
+  }
+  if (status.state === "failed") {
+    out.replaceChildren(el("p", { class: "problems" }, "The tournament stopped with an error: " + status.error));
+    return;
+  }
+  if (!status.results) {
+    out.replaceChildren(el("p", { class: "empty" }, "Add at least two entries, then run the tournament. Each pair of decks plays two games, one with each on the play."));
+    return;
+  }
+  out.replaceChildren(...renderResults(status.results));
+}
+
+function cellColor(points) {
+  // 0 (lost both) -> red, 2 (two draws) -> grey, 6 (won both) -> green
+  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const red = [176, 59, 59], grey = [140, 146, 156], green = [46, 122, 85];
+  const rgb = points <= 2 ? mix(red, grey, points / 2) : mix(grey, green, (points - 2) / 4);
+  return `rgb(${rgb.join(",")})`;
+}
+
+function renderResults(r) {
+  const names = r.entries.map((e) => e.name);
+  const standings = el("ol", { class: "standings" }, ...r.standings.map((s, i) =>
+    el("li", {},
+      el("span", { class: "rank" }, String(i + 1)),
+      el("span", {}, el("span", { class: "standing-name" }, s.name), el("span", { class: "standing-cards" }, s.cards.join(", "))),
+      el("span", { class: "pts" }, fmt(s.points) + " pts",
+        el("span", { class: "record" }, `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)))));
+
+  const head = el("tr", {}, el("th"), ...names.map((n, j) => el("th", { scope: "col", title: n }, String(j + 1))));
+  const rows = names.map((n, i) => el("tr", {},
+    el("th", { scope: "row" }, `${i + 1}. ${n}`),
+    ...r.matrix[i].map((p) => p == null
+      ? el("td", { class: "self" }, "–")
+      : Object.assign(el("td", { title: `${n}: ${fmt(p)} of 6 points` }, fmt(p)), { style: `background:${cellColor(p)}` }))));
+  const matrix = el("div", { class: "matrix-wrap" }, el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, ...rows)));
+
+  const games = r.games.map((g) => {
+    const winner = g.pWinA > 0.999 ? g.a : g.pWinB > 0.999 ? g.b : null;
+    const certainDraw = g.pDraw > 0.999;
+    const verdict = winner ? `${winner} wins` : certainDraw ? "Draw"
+      : `${g.a} ${(100 * g.pWinA).toFixed(0)}%, draw ${(100 * g.pDraw).toFixed(0)}%, ${g.b} ${(100 * g.pWinB).toFixed(0)}%`;
+    const cls = certainDraw || !winner ? "draw" : "win";
+    const steps = g.line.map((s) => s.startsWith("=>")
+      ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " "))
+      : el("li", {}, s.replace(/^A /, g.a + ": ").replace(/^B /, g.b + ": ").replace(/^Chance /, "Chance: ")));
+    return el("details", {},
+      el("summary", {},
+        el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
+        el("span", { class: "verdict " + cls }, verdict),
+        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurnLimit}`)),
+      el("ol", { class: "line" }, ...steps));
+  });
+
+  return [
+    standings,
+    el("h3", {}, "Matchups"),
+    matrix,
+    el("p", { class: "caption" }, "Points each row deck scored against each column deck over their two games: 6 means it won both, 2 means two draws."),
+    el("h3", {}, "Games"),
+    el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found."),
+    ...games,
+  ];
+}
+
+loadEntries();
+poll();
+</script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+diff --git a/forge-core/src/main/java/forge/util/MyRandom.java b/forge-core/src/main/java/forge/util/MyRandom.java
+index aac8f65a..edfb1e80 100644
+--- a/forge-core/src/main/java/forge/util/MyRandom.java
++++ b/forge-core/src/main/java/forge/util/MyRandom.java
+@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicLong;
+ public class MyRandom {
+     /** Constant <code>random</code>. */
+     private static final AtomicLong calls = new AtomicLong();
+-    private static Random random = new CountingRandom(new SecureRandom());
++    // Thread-local so independent games can be simulated deterministically in parallel (3 Card Blind solver).
++    private static final ThreadLocal<Random> random = ThreadLocal.withInitial(() -> new CountingRandom(new SecureRandom()));
+ 
+     /** Every Random method (nextInt, nextBoolean, shuffle, ...) funnels through next(bits). */
+     private static final class CountingRandom extends Random {
+@@ -60,7 +61,7 @@ public class MyRandom {
+      * @return the random
+      */
+     public static Random getRandom() {
+-        return MyRandom.random;
++        return MyRandom.random.get();
+     }
+ 
+     /**
+@@ -68,14 +69,23 @@ public class MyRandom {
+      * @param random the random
+      */
+     public static void setRandom(Random random) {
+-        MyRandom.random = random instanceof CountingRandom ? random : new CountingRandom(random);
++        MyRandom.random.set(random instanceof CountingRandom ? random : new CountingRandom(random));
++    }
++
++    /**
++     * Sets this thread's random provider without the call-counting wrapper, so overrides of
++     * nextInt(bound), nextBoolean() etc. are seen. Used by the 3 Card Blind solver to turn random
++     * events into chance nodes.
++     */
++    public static void setRandomDirect(Random random) {
++        MyRandom.random.set(random);
+     }
+ 
+     public static int[] splitIntoRandomGroups(final int value, final int numGroups) {
+         int[] groups = new int[numGroups];
+ 
+         for (int i = 0; i < value; i++) {
+-            groups[random.nextInt(numGroups)]++;
++            groups[getRandom().nextInt(numGroups)]++;
+         }
+ 
+         return groups;

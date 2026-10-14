@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# 3 Card Blind launcher. Build first with ./build.sh.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+jar="$root/cli/target/tcb-cli-0.1.0-SNAPSHOT.jar"
+if [[ ! -f "$jar" ]]; then
+    echo "tcb: $jar not found; run ./build.sh first" >&2
+    exit 1
+fi
+exec java ${TCB_JAVA_OPTS:-} -Xss512m -Xmx${TCB_HEAP:-8g} \
+    -Dtcb.forgeGuiDir="$root/forge/forge-gui" \
+    -cp "$jar:$root/cli/target/lib/*" tcb.cli.Main "$@"

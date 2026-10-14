@@ -1,0 +1,111 @@
+diff --git a/forge-game/src/main/java/forge/game/Game.java b/forge-game/src/main/java/forge/game/Game.java
+index 56e9e8fc..3c57e204 100644
+--- a/forge-game/src/main/java/forge/game/Game.java
++++ b/forge-game/src/main/java/forge/game/Game.java
+@@ -65,8 +65,10 @@ public class Game {
+ 
+     private static final TaggedLogger netLog = Logger.tag("NETWORK");
+ 
+-    private static int maxId = 0;
+-    private static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    private static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     private boolean noGUIUser;
+ 
+diff --git a/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java b/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
+index b5b396dc..09ef28f0 100644
+--- a/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
++++ b/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
+@@ -47,8 +47,10 @@ import forge.util.TextUtil;
+  *
+  */
+ public abstract class ReplacementEffect extends TriggerReplacementBase {
+-    private static int maxId = 0;
+-    private static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    private static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     /** The ID. */
+     private int id;
+diff --git a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
+index 3c5c70ab..a58d58ca 100644
+--- a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
++++ b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
+@@ -75,8 +75,10 @@ import forge.game.zone.ZoneType;
+  * @version $Id$
+  */
+ public abstract class SpellAbility extends CardTraitBase implements ISpellAbility, IIdentifiable, Comparable<SpellAbility> {
+-    private static int maxId = 0;
+-    private static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    private static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     public static class EmptySa extends SpellAbility {
+         public EmptySa(Card sourceCard) { super(sourceCard, Cost.Zero); setActivatingPlayer(sourceCard.getController());}
+diff --git a/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java b/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
+index bbee2448..636dacb1 100644
+--- a/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
++++ b/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
+@@ -38,8 +38,10 @@ import forge.util.TextUtil;
+  * @version $Id$
+  */
+ public class SpellAbilityStackInstance implements IIdentifiable, IHasCardView {
+-    private static int maxId = 0;
+-    public static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    public static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     // At some point I want this functioning more like Target/Target Choices
+     // where the SA has an "active"
+diff --git a/forge-game/src/main/java/forge/game/staticability/StaticAbility.java b/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
+index 2a8bbe57..af2b2727 100644
+--- a/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
++++ b/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
+@@ -51,8 +51,10 @@ import forge.util.*;
+  * The Class StaticAbility.
+  */
+ public class StaticAbility extends CardTraitBase implements IIdentifiable, Cloneable, Comparable<StaticAbility> {
+-    private static int maxId = 0;
+-    private static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    private static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     private int id;
+ 
+diff --git a/forge-game/src/main/java/forge/game/trigger/Trigger.java b/forge-game/src/main/java/forge/game/trigger/Trigger.java
+index 743c627c..48c935ab 100644
+--- a/forge-game/src/main/java/forge/game/trigger/Trigger.java
++++ b/forge-game/src/main/java/forge/game/trigger/Trigger.java
+@@ -52,8 +52,10 @@ import java.util.*;
+  * @version $Id$
+  */
+ public abstract class Trigger extends TriggerReplacementBase {
+-    private static int maxId = 0;
+-    private static int nextId() { return ++maxId; }
++    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
++    private static final ThreadLocal<int[]> maxId = ThreadLocal.withInitial(() -> new int[1]);
++    private static int nextId() { return ++maxId.get()[0]; }
++    public static void resetIds(int start) { maxId.get()[0] = start; }
+ 
+     /**
+      * <p>
+@@ -61,7 +63,7 @@ public abstract class Trigger extends TriggerReplacementBase {
+      * </p>
+      */
+     public static void resetIDs() {
+-        Trigger.maxId = 50000;
++        resetIds(50000);
+     }
+ 
+     /** The ID. */
