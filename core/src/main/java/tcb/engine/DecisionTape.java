@@ -12,24 +12,45 @@ import java.util.function.Supplier;
  * {@link Signals.BranchReached} so the search can expand that node.
  */
 public final class DecisionTape {
-    private final int[] choices;
-    private final int[] checksums;
+    /**
+     * One recorded choice.
+     *
+     * @param choice   option index
+     * @param checksum label checksum when the choice was made (0 = don't verify)
+     * @param ordinal  {@link Signals.Branch#ordinal()} of the decision, or -1 if unknown
+     * @param pass     the choice was "Pass" at a priority decision
+     */
+    public record Step(int choice, int checksum, int ordinal, boolean pass) {
+    }
+
+    private static final String PASS = "Pass";
+
+    private final Step[] steps;
     private final int turnLimit;
     private int pos;
+    /** Decisions asked for so far, including those with a single option. */
+    private int calls;
     private final List<String> trace = new ArrayList<>();
     private final Set<String> checkpoints = new HashSet<>();
     private int lastCheckpointTurn = -1;
     /** Set when the game runs on its own thread and pauses at new decisions instead of stopping. */
     private Continuation.Handoff handoff;
 
+    /** @param steps the choice at each successive branching decision */
+    public DecisionTape(Step[] steps, int turnLimit) {
+        this.steps = steps;
+        this.turnLimit = turnLimit;
+    }
+
     /**
      * @param choices   option index for each successive branching decision
      * @param checksums label checksum recorded when each choice was made (0 = don't verify)
      */
     public DecisionTape(int[] choices, int[] checksums, int turnLimit) {
-        this.choices = choices;
-        this.checksums = checksums;
-        this.turnLimit = turnLimit;
+        this(new Step[choices.length], turnLimit);
+        for (int i = 0; i < choices.length; i++) {
+            steps[i] = new Step(choices[i], checksums[i], -1, false);
+        }
     }
 
     void pauseAtNewDecisions(Continuation.Handoff handoff) {
@@ -79,6 +100,30 @@ public final class DecisionTape {
     }
 
     /**
+     * Replay shortcut for a priority decision: true if the tape shows that the player passes here,
+     * so the caller can pass without listing every option. Counts as the decision (don't also call
+     * {@link #decide}). Needs steps with known ordinals.
+     */
+    boolean replaysPass(int player) {
+        if (pos >= steps.length || steps[pos].ordinal() < 0) {
+            return false;
+        }
+        Step next = steps[pos];
+        if (next.ordinal() > calls) {
+            // Not a branching decision when the tape was recorded: passing was the only option.
+            calls++;
+            return true;
+        }
+        if (next.ordinal() == calls && next.pass()) {
+            calls++;
+            pos++;
+            trace.add(who(player) + " priority: " + PASS);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Picks one of {@code labels}. Single-option decisions are taken without using the tape.
      * Past the end of the tape, either stops the game ({@link Signals.BranchReached}) or, for a
      * game started with {@link GameRunner#start}, pauses until the search picks an option.
@@ -87,12 +132,13 @@ public final class DecisionTape {
         if (labels.isEmpty()) {
             throw new IllegalArgumentException("decision without options: " + kind);
         }
+        int ordinal = calls++;
         if (labels.size() == 1) {
             return 0;
         }
         int choice;
-        if (pos >= choices.length) {
-            Signals.Branch branch = new Signals.Branch(player, kind, List.copyOf(labels), position.get(), turn);
+        if (pos >= steps.length) {
+            Signals.Branch branch = new Signals.Branch(player, kind, List.copyOf(labels), position.get(), turn, ordinal);
             if (handoff == null) {
                 throw new Signals.BranchReached(branch);
             }
@@ -102,17 +148,22 @@ public final class DecisionTape {
                 throw new IllegalArgumentException("choice " + choice + " out of range for " + labels);
             }
         } else {
-            choice = choices[pos];
-            int expected = checksums[pos];
-            if (choice >= labels.size() || (expected != 0 && expected != checksum(labels))) {
+            Step step = steps[pos];
+            choice = step.choice();
+            int expected = step.checksum();
+            if (choice >= labels.size() || (expected != 0 && expected != checksum(labels))
+                    || (step.ordinal() >= 0 && step.ordinal() != ordinal)) {
                 throw new IllegalStateException("Non-deterministic replay at decision " + pos + " (" + kind
                         + "): options are now " + labels);
             }
             pos++;
         }
-        String who = player == CHANCE ? "Chance" : player == 0 ? "A" : "B";
-        trace.add(who + " " + kind + ": " + labels.get(choice));
+        trace.add(who(player) + " " + kind + ": " + labels.get(choice));
         return choice;
+    }
+
+    private static String who(int player) {
+        return player == CHANCE ? "Chance" : player == 0 ? "A" : "B";
     }
 
     public static int checksum(List<String> labels) {

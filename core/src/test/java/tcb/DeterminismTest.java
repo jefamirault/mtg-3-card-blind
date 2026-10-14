@@ -50,7 +50,8 @@ class DeterminismTest {
 
     @Test
     void pausedGamesMatchReplays() {
-        // Continuing a paused game must reach exactly the state a fresh replay of the same choices reaches.
+        // Continuing a paused game must reach exactly the state a fresh replay of the same choices
+        // reaches, both for a full replay and for one that skips listing the options of passes.
         for (int a = 0; a < DECKS.length; a++) {
             for (int b = 0; b < DECKS.length; b++) {
                 if (a != b) {
@@ -63,17 +64,25 @@ class DeterminismTest {
     private static void continueWalk(DeckList deckA, DeckList deckB, Random rnd) {
         GameRunner runner = new GameRunner(deckA, deckB, rnd.nextInt(2));
         int[] tape = new int[0];
-        Outcome live = runner.start(new DecisionTape(tape, tape, 30));
+        DecisionTape.Step[] steps = new DecisionTape.Step[0];
+        Outcome live = runner.start(new DecisionTape(steps, 30));
         while (true) {
             Outcome replay = runner.run(new DecisionTape(tape, new int[tape.length], 30));
+            Outcome fast = runner.run(new DecisionTape(steps, 30));
             String where = deckA.name() + " vs " + deckB.name() + " tape " + Arrays.toString(tape);
-            assertEquals(replay.trace(), live.trace(), where);
-            assertEquals(replay.result(), live.result(), where);
+            for (Outcome o : List.of(live, fast)) {
+                assertEquals(replay.trace(), o.trace(), where);
+                assertEquals(replay.result(), o.result(), where);
+                assertEquals(replay.branch(), o.branch(), where);
+            }
             if (replay.isTerminal()) break;
-            assertEquals(replay.branch(), live.branch(), where);
-            int choice = rnd.nextInt(replay.branch().labels().size());
+            // Mostly pass, like a real search line, so the fast path gets exercised.
+            int n = replay.branch().labels().size();
+            int choice = rnd.nextInt(3) == 0 ? rnd.nextInt(n) : n - 1;
             tape = Arrays.copyOf(tape, tape.length + 1);
             tape[tape.length - 1] = choice;
+            steps = Arrays.copyOf(steps, steps.length + 1);
+            steps[steps.length - 1] = replay.branch().step(choice);
             live = live.continuation().resume(choice);
         }
     }

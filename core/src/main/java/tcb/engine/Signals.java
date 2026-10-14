@@ -42,8 +42,16 @@ public final class Signals {
      * @param position canonical game position excluding the turn number, or null when the state
      *                 can't be serialised faithfully (e.g. non-empty stack, mid-combat)
      * @param turn     current turn number
+     * @param ordinal  how many decisions (of any kind, including single-option ones) came before
+     *                 this one in the game; lets replays skip listing the options of a pass
      */
-    public record Branch(int player, String kind, List<String> labels, String position, int turn) {
+    public record Branch(int player, String kind, List<String> labels, String position, int turn, int ordinal) {
+        /** The step that records choosing option {@code i} here, for replaying. */
+        public DecisionTape.Step step(int i) {
+            boolean pass = kind.equals("priority") && i == labels.size() - 1;
+            return new DecisionTape.Step(i, DecisionTape.checksum(labels), ordinal, pass);
+        }
+
         /** Transposition-table key: the position plus the turn (values depend on turns remaining). */
         public String stateKey() {
             return position == null ? null : turn + "|" + position;

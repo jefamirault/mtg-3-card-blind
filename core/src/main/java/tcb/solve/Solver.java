@@ -12,6 +12,7 @@ import java.util.Set;
 import tcb.deck.DeckList;
 import tcb.engine.Continuation;
 import tcb.engine.DecisionTape;
+import tcb.engine.DecisionTape.Step;
 import tcb.engine.GameRunner;
 import tcb.engine.GameRunner.Outcome;
 import tcb.engine.Signals.Branch;
@@ -180,13 +181,13 @@ public final class Solver {
         sawChance = false;
         turnLimit = limit;
         pass = "can A force a win?";
-        Line aWins = search(new int[0], new int[0], limit, 0, 1, null);
+        Line aWins = search(new Step[0], limit, 0, 1, null);
         if (!sawChance) {
             if (aWins.value() >= 1) {
                 return aWins;
             }
             pass = "can B force a win?";
-            Line bWins = search(new int[0], new int[0], limit, -1, 0, null);
+            Line bWins = search(new Step[0], limit, -1, 0, null);
             if (bWins.value() <= -1) {
                 return bWins;
             }
@@ -195,14 +196,14 @@ public final class Solver {
         }
         table.clear();
         pass = "expected result (random events)";
-        return search(new int[0], new int[0], limit, -1, 1, null);
+        return search(new Step[0], limit, -1, 1, null);
     }
 
     /**
      * @param known the node's outcome if the caller already has it (the parent's paused game,
      *              resumed); null to replay the game up to the node
      */
-    private Line search(int[] choices, int[] checks, int limit, double alpha, double beta, Outcome known) {
+    private Line search(Step[] steps, int limit, double alpha, double beta, Outcome known) {
         Outcome outcome = known;
         try {
             long n = nodes + 1;
@@ -211,7 +212,7 @@ public final class Solver {
                 throw new BudgetExceeded();
             }
             if (outcome == null) {
-                outcome = runner.start(new DecisionTape(choices, checks, limit));
+                outcome = runner.start(new DecisionTape(steps, limit));
             }
             if (outcome.isTerminal()) {
                 return Line.of(outcome.value());
@@ -219,7 +220,7 @@ public final class Solver {
             Branch branch = outcome.branch();
             if (branch.player() == DecisionTape.CHANCE) {
                 sawChance = true;
-                return chance(outcome, choices, checks, limit);
+                return chance(outcome, steps, limit);
             }
             String position = branch.position();
             if (position != null && !path.add(position)) {
@@ -228,7 +229,7 @@ public final class Solver {
                 return Line.of(0);
             }
             try {
-                return expand(outcome, choices, checks, limit, alpha, beta);
+                return expand(outcome, steps, limit, alpha, beta);
             } finally {
                 if (position != null) {
                     path.remove(position);
@@ -252,14 +253,13 @@ public final class Solver {
     }
 
     /** Random event: every outcome equally likely, each searched exactly. */
-    private Line chance(Outcome node, int[] choices, int[] checks, int limit) {
+    private Line chance(Outcome node, Step[] steps, int limit) {
         Branch branch = node.branch();
-        int checksum = DecisionTape.checksum(branch.labels());
         int n = branch.labels().size();
         double value = 0, pWin = 0, pDraw = 0, pLoss = 0;
         int[] pv = null;
         for (int i = 0; i < n; i++) {
-            Line child = search(append(choices, i), append(checks, checksum), limit, -1, 1, resume(node, i));
+            Line child = search(append(steps, branch.step(i)), limit, -1, 1, resume(node, i));
             value += child.value() / n;
             pWin += child.pWin() / n;
             pDraw += child.pDraw() / n;
@@ -271,7 +271,7 @@ public final class Solver {
         return new Line(value, pWin, pDraw, pLoss, pv);
     }
 
-    private Line expand(Outcome node, int[] choices, int[] checks, int limit, double alpha, double beta) {
+    private Line expand(Outcome node, Step[] steps, int limit, double alpha, double beta) {
         Branch branch = node.branch();
         String key = key(branch);
         double origAlpha = alpha;
@@ -291,14 +291,13 @@ public final class Solver {
         }
 
         boolean maximizing = branch.player() == 0;
-        int checksum = DecisionTape.checksum(branch.labels());
         int n = branch.labels().size();
         Line best = null;
         int bestIndex = -1;
         for (int k = 0; k < n; k++) {
             // try the transposition table's best move first
             int i = k == 0 ? firstTry : (k <= firstTry ? k - 1 : k);
-            Line child = search(append(choices, i), append(checks, checksum), limit, alpha, beta, resume(node, i));
+            Line child = search(append(steps, branch.step(i)), limit, alpha, beta, resume(node, i));
             double v = child.value();
             if (best == null || (maximizing ? v > best.value() : v < best.value())) {
                 best = child.withPv(prepend(i, child.pv()));
@@ -357,6 +356,12 @@ public final class Solver {
 
     private String key(Branch branch) {
         return options.exactTurns() ? branch.stateKey() : branch.position();
+    }
+
+    private static Step[] append(Step[] a, Step x) {
+        Step[] r = Arrays.copyOf(a, a.length + 1);
+        r[a.length] = x;
+        return r;
     }
 
     private static int[] append(int[] a, int x) {

@@ -86,6 +86,9 @@ public class SolverController extends PlayerControllerAi {
         if (game.getPhaseHandler().is(PhaseType.MAIN1, player) && game.getStack().isEmpty() && tape.checkpointDue(turn)) {
             tape.checkpoint(position("checkpoint", List.of()));
         }
+        if (tape.replaysPass(me())) {
+            return null;
+        }
 
         Map<String, PlayOption> options = new LinkedHashMap<>();
         for (SpellAbility sa : candidateAbilities()) {
@@ -104,7 +107,7 @@ public class SolverController extends PlayerControllerAi {
         }
 
         List<String> labels = new ArrayList<>(options.keySet());
-        labels.add("Pass");
+        labels.add("Pass"); // last: Branch.step() relies on it
         // Positions are only serialised with an empty stack (stack contents aren't in the dump).
         int choice = decide("priority", labels, game.getStack().isEmpty());
         if (choice == labels.size() - 1) {
