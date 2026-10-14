@@ -111,6 +111,14 @@ final class Equivalence {
     }
 
     /**
+     * Like {@link #key(Card)} for creatures that block the same attacker (or are blocked by the
+     * same blocker): their shared combat role doesn't tell them apart.
+     */
+    String keyAmongCombatants(Card c) {
+        return everythingDistinct || referenced.contains(c) ? "#" + c.getId() : state(game, c);
+    }
+
+    /**
      * A card's current state without its id: zone, control, and on the battlefield its status and
      * current characteristics (which include temporary changes, e.g. a land animated until end of
      * turn, that Forge's game-state dump leaves out).

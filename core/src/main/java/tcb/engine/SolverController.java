@@ -7,17 +7,28 @@ import java.util.List;
 import java.util.Map;
 
 import forge.ai.AiCache;
+import forge.ai.ComputerUtil;
 import forge.ai.ComputerUtilAbility;
 import forge.ai.ComputerUtilCard;
+import forge.ai.ComputerUtilCombat;
 import forge.ai.ComputerUtilCost;
+import forge.ai.ComputerUtilMana;
 import forge.ai.PlayerControllerAi;
 import forge.game.Game;
 import forge.game.GameEntity;
 import forge.game.GameObject;
 import forge.game.GameState;
+import forge.game.ability.AbilityUtils;
+import forge.game.ability.ApiType;
+import forge.game.ability.effects.CharmEffect;
 import forge.game.card.Card;
 import forge.game.card.CardCollection;
+import forge.card.mana.ManaCost;
 import forge.game.card.CardCollectionView;
+import forge.game.cost.Cost;
+import forge.game.cost.CostPartMana;
+import forge.game.keyword.Keyword;
+import forge.game.mana.ManaConversionMatrix;
 import forge.game.combat.Combat;
 import forge.game.combat.CombatUtil;
 import forge.game.phase.PhaseType;
@@ -32,7 +43,8 @@ import forge.util.collect.FCollectionView;
 
 /**
  * A Forge player controller whose decisions all come from a {@link DecisionTape}: every real choice
- * (what to cast and at which targets, attacks, blocks, yes/no prompts, numbers, modes, single picks)
+ * (what to cast with which X and targets, trigger targets and order, mana payment, attacks,
+ * blocks, combat damage, opening-hand actions, yes/no prompts, numbers, modes, card picks)
  * becomes a branch point of the game tree.
  *
  * Choices not yet enumerated here fall back to Forge's AI heuristics (inherited from
@@ -41,6 +53,8 @@ import forge.util.collect.FCollectionView;
 public class SolverController extends PlayerControllerAi {
     /** Upper bound on options enumerated for a single decision; larger choices fall back to the AI. */
     static final int MAX_OPTIONS = 64;
+    /** Cap on target assignments listed for one spell or ability (beyond it, the rest are dropped). */
+    static final int MAX_TARGETINGS = 512;
 
     private final DecisionTape tape;
     private final int startingPlayer;
@@ -80,10 +94,55 @@ public class SolverController extends PlayerControllerAi {
         return true; // 3CB: no mulligans
     }
 
+    /** Leylines, Gemstone Caverns, Chancellors: which to use (in the order Forge lists them). */
+    @Override
+    public List<SpellAbility> chooseSaToActivateFromOpeningHand(List<SpellAbility> usable) {
+        if (usable.size() > 6) {
+            return super.chooseSaToActivateFromOpeningHand(usable);
+        }
+        Equivalence eq = equivalence();
+        Map<String, List<SpellAbility>> subsets = new LinkedHashMap<>();
+        for (int mask = (1 << usable.size()) - 1; mask >= 0; mask--) {
+            List<SpellAbility> subset = new ArrayList<>();
+            List<String> keys = new ArrayList<>();
+            for (int i = 0; i < usable.size(); i++) {
+                if ((mask & (1 << i)) != 0) {
+                    subset.add(usable.get(i));
+                    keys.add(eq.key(usable.get(i).getHostCard()) + ": " + usable.get(i).getDescription());
+                }
+            }
+            keys.sort(null);
+            subsets.putIfAbsent(String.join(" | ", keys), subset);
+        }
+        List<List<SpellAbility>> options = new ArrayList<>(subsets.values());
+        List<String> labels = new ArrayList<>();
+        for (List<SpellAbility> subset : options) {
+            List<String> names = new ArrayList<>();
+            for (SpellAbility sa : subset) {
+                names.add(sa.getHostCard().getName());
+            }
+            String label = "From opening hand: " + (names.isEmpty() ? "nothing" : String.join(", ", names));
+            labels.add(labels.contains(label) ? label + " (" + labels.size() + ")" : label);
+        }
+        return options.get(decide("opening hand", labels, false));
+    }
+
     // ---------------------------------------------------------------- priority
 
-    private record PlayOption(SpellAbility sa, List<List<GameObject>> targets) {
+    /** A spell or ability to play, with its X (null if none) and targets (null if untargeted). */
+    private record PlayOption(SpellAbility sa, Integer x, List<TargetEnumerator.Part> targets) {
+        void prepare() {
+            if (x != null) {
+                sa.setXManaCostPaid(x);
+            }
+            if (targets != null) {
+                TargetEnumerator.apply(sa, targets);
+            }
+        }
     }
+
+    /** Largest X offered when casting; bigger values fall back to the largest affordable. */
+    static final int MAX_X = 20;
 
     @Override
     public List<SpellAbility> chooseSpellAbilityToPlay() {
@@ -108,24 +167,33 @@ public class SolverController extends PlayerControllerAi {
         Map<String, PlayOption> byKey = new LinkedHashMap<>();
         Map<String, String> labelByKey = new LinkedHashMap<>();
         for (SpellAbility sa : candidateAbilities()) {
-            String base = describe(sa);
-            String baseKey = eq.key(sa.getHostCard()) + "|" + sa.getDescription() + "|" + base;
-            if (TargetEnumerator.targetingParts(sa).isEmpty()) {
-                if (byKey.putIfAbsent(baseKey, new PlayOption(sa, null)) == null) {
-                    labelByKey.put(baseKey, base);
+            for (Integer x : xValues(sa)) {
+                if (x != null) {
+                    sa.setXManaCostPaid(x);
                 }
-                continue;
-            }
-            for (List<List<GameObject>> targets : TargetEnumerator.enumerate(sa, MAX_OPTIONS)) {
-                TargetEnumerator.apply(sa, targets);
-                if (sa.isTargetNumberValid() && ComputerUtilCost.canPayCost(sa, player, false)) {
-                    String key = baseKey + " -> " + TargetEnumerator.key(targets, eq);
-                    if (byKey.putIfAbsent(key, new PlayOption(sa, targets)) == null) {
-                        labelByKey.put(key, base + " -> " + TargetEnumerator.describe(targets));
+                String base = describe(sa) + (x == null ? "" : " with X=" + x);
+                String baseKey = eq.key(sa.getHostCard()) + "|" + sa.getDescription() + "|" + base;
+                if (TargetEnumerator.targetingParts(sa).isEmpty()) {
+                    if ((x == null || ComputerUtilCost.canPayCost(sa, player, false))
+                            && byKey.putIfAbsent(baseKey, new PlayOption(sa, x, null)) == null) {
+                        labelByKey.put(baseKey, base);
+                    }
+                    continue;
+                }
+                for (List<TargetEnumerator.Part> targets : TargetEnumerator.enumerate(sa, MAX_TARGETINGS)) {
+                    TargetEnumerator.apply(sa, targets);
+                    if (TargetEnumerator.valid(sa) && ComputerUtilCost.canPayCost(sa, player, false)) {
+                        String key = baseKey + " -> " + TargetEnumerator.key(targets, eq);
+                        if (byKey.putIfAbsent(key, new PlayOption(sa, x, targets)) == null) {
+                            labelByKey.put(key, base + " -> " + TargetEnumerator.describe(targets));
+                        }
                     }
                 }
+                TargetEnumerator.clear(TargetEnumerator.targetingParts(sa));
             }
-            TargetEnumerator.clear(TargetEnumerator.targetingParts(sa));
+            if (sa.costHasManaX()) {
+                sa.setXManaCostPaid(null);
+            }
         }
         // Distinct options need distinct labels: tell same-named sources apart by card id.
         Map<String, PlayOption> options = new LinkedHashMap<>();
@@ -145,10 +213,26 @@ public class SolverController extends PlayerControllerAi {
             return null;
         }
         PlayOption option = options.get(labels.get(choice));
-        if (option.targets() != null) {
-            TargetEnumerator.apply(option.sa(), option.targets());
-        }
+        option.prepare();
         return List.of(option.sa());
+    }
+
+    /**
+     * Values of X to offer: every affordable value from the cost's minimum up (Forge's AI would
+     * pick one by heuristics, or leave it at 0). A single null for abilities without X.
+     */
+    private List<Integer> xValues(SpellAbility sa) {
+        List<Integer> values = new ArrayList<>();
+        if (!sa.costHasManaX()) {
+            values.add(null);
+            return values;
+        }
+        int min = sa.getPayCosts().getCostMana() == null ? 0 : sa.getPayCosts().getCostMana().getXMin();
+        int max = Math.min(MAX_X, ComputerUtilMana.determineLeftoverMana(sa, player, false));
+        for (int x = min; x <= max; x++) {
+            values.add(x);
+        }
+        return values;
     }
 
     /**
@@ -194,7 +278,7 @@ public class SolverController extends PlayerControllerAi {
             if (!sa.isLegalAfterStack() || !sa.canPlay()) {
                 continue;
             }
-            if (TargetEnumerator.targetingParts(sa).isEmpty() && !ComputerUtilCost.canPayCost(sa, player, false)) {
+            if (TargetEnumerator.targetingParts(sa).isEmpty() && !sa.costHasManaX() && !ComputerUtilCost.canPayCost(sa, player, false)) {
                 continue;
             }
             result.add(sa);
@@ -433,6 +517,202 @@ public class SolverController extends PlayerControllerAi {
         return parts.isEmpty() ? "No blocks" : String.join(", ", parts);
     }
 
+    // ---------------------------------------------------------------- mana payment
+
+    /**
+     * Which permanents pay a mana cost (Mox or land, which colour to keep open, Ancient Tomb's
+     * damage...). Branches on each minimal set of tap-for-mana permanents that can pay; Forge's
+     * AI then pays from that set, with the other permanents briefly set aside (marked tapped
+     * without any game event).
+     */
+    @Override
+    public boolean payManaCost(ManaCost toPay, CostPartMana costPartMana, SpellAbility sa, String prompt,
+                               ManaConversionMatrix matrix, boolean effect) {
+        if (toPay.isZero()) {
+            return super.payManaCost(toPay, costPartMana, sa, prompt, matrix, effect);
+        }
+        List<Card> sources = new ArrayList<>();
+        for (Card c : player.getCardsIn(ZoneType.Battlefield)) {
+            if (c.isUntapped() && !c.getManaAbilities().isEmpty()
+                    && c.getManaAbilities().stream().allMatch(ma -> ma.getPayCosts().hasTapCost())) {
+                sources.add(c);
+            }
+        }
+        if (sources.size() < 2 || sources.size() > 8) {
+            return super.payManaCost(toPay, costPartMana, sa, prompt, matrix, effect);
+        }
+        Cost cost = new Cost(toPay, effect);
+        Equivalence eq = equivalence();
+        List<String> keys = keys(sources, eq);
+        Map<String, Integer> plans = new LinkedHashMap<>(); // distinct minimal subsets, as bit masks
+        List<Integer> found = new ArrayList<>();
+        for (int size = 0; size <= sources.size(); size++) {
+            for (int mask = 0; mask < (1 << sources.size()); mask++) {
+                if (Integer.bitCount(mask) != size) {
+                    continue;
+                }
+                final int m = mask;
+                if (found.stream().anyMatch(f -> (f & m) == f)) {
+                    continue; // a smaller set already pays
+                }
+                List<String> planKeys = new ArrayList<>();
+                for (int i = 0; i < sources.size(); i++) {
+                    if ((mask & (1 << i)) != 0) {
+                        planKeys.add(keys.get(i));
+                    }
+                }
+                planKeys.sort(null);
+                String planKey = String.join(" + ", planKeys);
+                if (plans.containsKey(planKey)) {
+                    found.add(mask);
+                    continue;
+                }
+                boolean pays;
+                List<Card> aside = setAside(sources, mask);
+                try {
+                    pays = ComputerUtilMana.canPayManaCost(cost, sa, player, 0, effect);
+                } finally {
+                    restore(aside);
+                }
+                if (pays) {
+                    found.add(mask);
+                    plans.put(planKey, mask);
+                }
+            }
+        }
+        if (plans.size() <= 1) {
+            return super.payManaCost(toPay, costPartMana, sa, prompt, matrix, effect);
+        }
+        List<Integer> masks = new ArrayList<>(plans.values());
+        List<String> labels = new ArrayList<>();
+        for (int mask : masks) {
+            List<String> names = new ArrayList<>();
+            for (int i = 0; i < sources.size(); i++) {
+                if ((mask & (1 << i)) != 0) {
+                    names.add(sources.get(i).getName());
+                }
+            }
+            labels.add("Pay " + toPay + " for " + sa.getHostCard().getName() + " with "
+                    + (names.isEmpty() ? "floating mana" : String.join(", ", names)));
+        }
+        int mask = masks.get(decide("mana", labels, false));
+        List<Card> aside = setAside(sources, mask);
+        try {
+            return super.payManaCost(toPay, costPartMana, sa, prompt, matrix, effect);
+        } finally {
+            restore(aside);
+        }
+    }
+
+    /** Marks the sources outside {@code mask} tapped (no events), so payment can't use them. */
+    private static List<Card> setAside(List<Card> sources, int mask) {
+        List<Card> aside = new ArrayList<>();
+        for (int i = 0; i < sources.size(); i++) {
+            if ((mask & (1 << i)) == 0 && sources.get(i).isUntapped()) {
+                sources.get(i).setTapped(true);
+                aside.add(sources.get(i));
+            }
+        }
+        return aside;
+    }
+
+    private static void restore(List<Card> aside) {
+        for (Card c : aside) {
+            c.setTapped(false);
+        }
+    }
+
+    // ---------------------------------------------------------------- combat damage
+
+    /**
+     * How an attacker (or a blocker blocking several attackers) divides its combat damage. Every
+     * split among the blockers; with trample, damage to the player only once every blocker has
+     * lethal damage. The rare cases this doesn't model fall back to Forge's AI.
+     */
+    @Override
+    public Map<Card, Integer> assignCombatDamage(Card attacker, CardCollectionView blockers, CardCollectionView remaining,
+                                                 int damageDealt, GameEntity defender, boolean overrideOrder) {
+        boolean trample = attacker.hasKeyword(Keyword.TRAMPLE) && defender != null;
+        boolean special = attacker.hasKeyword("You may assign CARDNAME's combat damage divided as you choose among "
+                + "defending player and/or any number of creatures they control.");
+        if (!overrideOrder || special || blockers.isEmpty() || damageDealt <= 0 || (blockers.size() == 1 && !trample)) {
+            return super.assignCombatDamage(attacker, blockers, remaining, damageDealt, defender, overrideOrder);
+        }
+        List<Card> targets = new ArrayList<>(blockers);
+        int[] lethal = new int[targets.size()];
+        for (int i = 0; i < targets.size(); i++) {
+            lethal[i] = ComputerUtilCombat.getEnoughDamageToKill(targets.get(i), damageDealt, attacker, true);
+        }
+        Equivalence eq = equivalence();
+        List<String> keys = new ArrayList<>();
+        for (Card c : targets) {
+            keys.add(eq.keyAmongCombatants(c));
+        }
+        // split[i] for each blocker, then the player's share last
+        List<int[]> splits = new ArrayList<>();
+        splitDamage(damageDealt, new int[targets.size() + 1], 0, splits);
+        Map<String, int[]> distinct = new LinkedHashMap<>();
+        for (int[] split : splits) {
+            int toPlayer = split[targets.size()];
+            if (toPlayer > 0) {
+                boolean allLethal = trample;
+                for (int i = 0; i < targets.size() && allLethal; i++) {
+                    allLethal = split[i] >= lethal[i];
+                }
+                if (!allLethal) {
+                    continue;
+                }
+            }
+            List<String> parts = new ArrayList<>();
+            for (int i = 0; i < targets.size(); i++) {
+                parts.add(keys.get(i) + " x" + split[i]);
+            }
+            parts.sort(null);
+            distinct.putIfAbsent(String.join(" | ", parts) + " | player x" + toPlayer, split);
+            if (distinct.size() > MAX_OPTIONS) {
+                return super.assignCombatDamage(attacker, blockers, remaining, damageDealt, defender, overrideOrder);
+            }
+        }
+        List<int[]> options = new ArrayList<>(distinct.values());
+        List<String> labels = new ArrayList<>();
+        for (int[] split : options) {
+            List<String> parts = new ArrayList<>();
+            for (int i = 0; i < targets.size(); i++) {
+                if (split[i] > 0) {
+                    parts.add(split[i] + " to " + targets.get(i).getName());
+                }
+            }
+            if (split[targets.size()] > 0) {
+                parts.add(split[targets.size()] + " to " + defender);
+            }
+            labels.add(attacker.getName() + " assigns " + (parts.isEmpty() ? "no damage" : String.join(", ", parts)));
+        }
+        int[] split = options.get(decide("damage assignment", labels, false));
+        Map<Card, Integer> result = new LinkedHashMap<>();
+        for (int i = 0; i < targets.size(); i++) {
+            if (split[i] > 0) {
+                result.put(targets.get(i), split[i]);
+            }
+        }
+        if (split[targets.size()] > 0) {
+            result.put(null, split[targets.size()]);
+        }
+        return result;
+    }
+
+    /** Every way to write {@code left} as an ordered sum of {@code cur.length} parts (each >= 0). */
+    private static void splitDamage(int left, int[] cur, int i, List<int[]> out) {
+        if (i == cur.length - 1) {
+            cur[i] = left;
+            out.add(cur.clone());
+            return;
+        }
+        for (int x = left; x >= 0; x--) {
+            cur[i] = x;
+            splitDamage(left - x, cur, i + 1, out);
+        }
+    }
+
     // ---------------------------------------------------------------- generic choices
 
     private boolean yesNo(String kind, String question) {
@@ -463,14 +743,38 @@ public class SolverController extends PlayerControllerAi {
 
     @Override
     public int chooseNumber(SpellAbility sa, String title, int min, int max) {
-        if (max - min + 1 > MAX_OPTIONS || max < min) {
+        if (max - min + 1 > MAX_CHOICE || max < min) {
             return super.chooseNumber(sa, title, min, max);
         }
         List<String> labels = new ArrayList<>();
         for (int n = min; n <= max; n++) {
             labels.add(title + ": " + n);
         }
-        return min + decide("number", labels, false);
+        return min + pick("number", labels);
+    }
+
+    /** Largest single choice enumerated (in steps of at most {@link #MAX_OPTIONS}); bigger ones use the AI. */
+    static final int MAX_CHOICE = 4096;
+
+    /**
+     * {@link #decide} for any number of options: more than {@link #MAX_OPTIONS} are split into
+     * groups, choosing a group first and then an option in it. Same choices, smaller branch points.
+     */
+    private int pick(String kind, List<String> labels) {
+        if (labels.size() <= MAX_OPTIONS) {
+            return decide(kind, labels, false);
+        }
+        int groupSize = MAX_OPTIONS;
+        while ((labels.size() + groupSize - 1) / groupSize > MAX_OPTIONS) {
+            groupSize *= MAX_OPTIONS;
+        }
+        List<String> groups = new ArrayList<>();
+        for (int from = 0; from < labels.size(); from += groupSize) {
+            int to = Math.min(labels.size(), from + groupSize) - 1;
+            groups.add(labels.get(from) + " ... " + labels.get(to));
+        }
+        int from = decide(kind + " (range)", groups, false) * groupSize;
+        return from + pick(kind, labels.subList(from, Math.min(labels.size(), from + groupSize)));
     }
 
     @Override
@@ -480,19 +784,19 @@ public class SolverController extends PlayerControllerAi {
 
     @Override
     public int chooseNumber(SpellAbility sa, String title, List<Integer> values, Player relatedPlayer) {
-        if (values.size() > MAX_OPTIONS || values.isEmpty()) {
+        if (values.size() > MAX_CHOICE || values.isEmpty()) {
             return super.chooseNumber(sa, title, values, relatedPlayer);
         }
         List<String> labels = new ArrayList<>();
         for (Integer v : values) {
             labels.add(title + ": " + v);
         }
-        return values.get(decide("number", labels, false));
+        return values.get(pick("number", labels));
     }
 
     @Override
     public <T extends GameEntity> T chooseSingleEntityForEffect(FCollectionView<T> optionList, DelayedReveal delayedReveal, SpellAbility sa, String title, boolean isOptional, Player targetedPlayer, Map<String, Object> params) {
-        if (optionList.isEmpty() || optionList.size() > MAX_OPTIONS) {
+        if (optionList.isEmpty() || optionList.size() > MAX_CHOICE) {
             return super.chooseSingleEntityForEffect(optionList, delayedReveal, sa, title, isOptional, targetedPlayer, params);
         }
         // One option per group of interchangeable items.
@@ -509,7 +813,7 @@ public class SolverController extends PlayerControllerAi {
         if (isOptional) {
             labels.add(title + ": (none)");
         }
-        int choice = decide("choose", labels, false);
+        int choice = pick("choose", labels);
         return choice < items.size() ? items.get(choice) : null;
     }
 
@@ -518,12 +822,15 @@ public class SolverController extends PlayerControllerAi {
         List<Card> cards = new ArrayList<>(sourceList);
         int lo = isOptional ? 0 : Math.max(0, min);
         int hi = Math.min(max, cards.size());
-        if (cards.size() > 12 || lo > hi) {
+        if (lo > hi) {
             return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
         }
         // Subsets that only swap interchangeable cards are one option.
         Equivalence eq = equivalence();
         List<String> keys = keys(cards, eq);
+        if (cards.size() > 12) {
+            return chooseCardsOneByOne(cards, keys, lo, hi, title);
+        }
         Map<String, CardCollection> distinct = new LinkedHashMap<>();
         for (int mask = 0; mask < (1 << cards.size()); mask++) {
             int size = Integer.bitCount(mask);
@@ -541,7 +848,7 @@ public class SolverController extends PlayerControllerAi {
             subsetKeys.sort(null);
             distinct.putIfAbsent(String.join(" + ", subsetKeys), subset);
             if (distinct.size() > MAX_OPTIONS) {
-                return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
+                return chooseCardsOneByOne(cards, keys, lo, hi, title);
             }
         }
         List<CardCollection> subsets = new ArrayList<>(distinct.values());
@@ -550,6 +857,42 @@ public class SolverController extends PlayerControllerAi {
             labels.add(title + ": " + (subset.isEmpty() ? "(none)" : subset.toString()));
         }
         return subsets.get(decide("choose cards", labels, false));
+    }
+
+    /**
+     * A subset of many cards, picked one card at a time (in list order, so each subset is reached
+     * once up to identical cards), then "done".
+     */
+    private CardCollection chooseCardsOneByOne(List<Card> cards, List<String> keys, int lo, int hi, String title) {
+        CardCollection chosen = new CardCollection();
+        int last = -1;
+        while (chosen.size() < hi) {
+            // the first card of each kind after the last pick, if enough cards remain to reach lo
+            Map<String, Integer> next = new LinkedHashMap<>();
+            for (int i = last + 1; i < cards.size(); i++) {
+                if (cards.size() - i >= lo - chosen.size()) {
+                    next.putIfAbsent(keys.get(i), i);
+                }
+            }
+            List<Integer> indices = new ArrayList<>(next.values());
+            List<String> labels = new ArrayList<>();
+            for (int i : indices) {
+                labels.add(title + ": add " + cards.get(i));
+            }
+            if (chosen.size() >= lo) {
+                labels.add(title + ": done");
+            }
+            if (labels.isEmpty()) {
+                break;
+            }
+            int choice = pick("choose cards", labels);
+            if (choice >= indices.size()) {
+                break;
+            }
+            last = indices.get(choice);
+            chosen.add(cards.get(last));
+        }
+        return chosen;
     }
 
     @Override
@@ -569,7 +912,9 @@ public class SolverController extends PlayerControllerAi {
                     combo.add(possible.get(i));
                 }
             }
-            combos.add(combo);
+            if (combo.stream().allMatch(SolverController::hasTargets)) {
+                combos.add(combo);
+            }
         }
         if (combos.isEmpty() || combos.size() > MAX_OPTIONS) {
             return super.chooseModeForAbility(sa, possible, min, num, allowRepeat);
@@ -582,7 +927,148 @@ public class SolverController extends PlayerControllerAi {
             }
             labels.add(sa.getHostCard().getName() + " modes: " + String.join(" + ", parts));
         }
-        return combos.get(decide("mode", labels, false));
+        List<AbilitySub> chosen = combos.get(decide("mode", labels, false));
+        // Forge's AI picks the chosen modes' targets while choosing them; branch on those too.
+        for (AbilitySub sub : chosen) {
+            chooseTargets(sub, "mode target");
+        }
+        return chosen;
+    }
+
+    private static boolean hasTargets(SpellAbility sa) {
+        return TargetEnumerator.targetingParts(sa).isEmpty() || !TargetEnumerator.enumerate(sa, 1).isEmpty();
+    }
+
+    // ---------------------------------------------------------------- targets outside priority
+
+    /**
+     * Branches on every legal target assignment (and division) for {@code sa}'s chain, as for
+     * spells cast at priority. Returns false if there is no legal assignment.
+     */
+    private boolean chooseTargets(SpellAbility sa, String kind) {
+        List<SpellAbility> parts = TargetEnumerator.targetingParts(sa);
+        if (parts.isEmpty()) {
+            return true;
+        }
+        Equivalence eq = equivalence();
+        Map<String, List<TargetEnumerator.Part>> byKey = new LinkedHashMap<>();
+        Map<String, List<TargetEnumerator.Part>> options = new LinkedHashMap<>();
+        for (List<TargetEnumerator.Part> targets : TargetEnumerator.enumerate(sa, MAX_TARGETINGS)) {
+            TargetEnumerator.apply(sa, targets);
+            if (TargetEnumerator.valid(sa) && byKey.putIfAbsent(TargetEnumerator.key(targets, eq), targets) == null) {
+                options.putIfAbsent(sa.getHostCard().getName() + " -> " + TargetEnumerator.describe(targets), targets);
+            }
+        }
+        TargetEnumerator.clear(parts);
+        if (options.isEmpty()) {
+            return false;
+        }
+        List<String> labels = new ArrayList<>(options.keySet());
+        TargetEnumerator.apply(sa, options.get(labels.get(decide(kind, labels, false))));
+        return true;
+    }
+
+    /** Targets for a triggered ability, a copy, or an ability whose targets another player picks. */
+    @Override
+    public boolean chooseTargetsFor(SpellAbility sa) {
+        return chooseTargets(sa, "targets");
+    }
+
+    @Override
+    public void playSpellAbilityNoStack(SpellAbility effectSA, boolean canSetupTargets) {
+        if (canSetupTargets && !chooseTargets(effectSA, "targets")) {
+            return;
+        }
+        ComputerUtil.playNoStack(player, effectSA, getGame(), true);
+    }
+
+    @Override
+    public boolean playTrigger(Card host, WrappedAbility wrapperAbility, boolean isMandatory) {
+        if (prepareTrigger(wrapperAbility)) {
+            return ComputerUtil.playNoStack(wrapperAbility.getActivatingPlayer(), wrapperAbility, getGame(), true);
+        }
+        return false;
+    }
+
+    /** Puts simultaneous triggers on the stack in a chosen order, with chosen targets. */
+    @Override
+    public void orderAndPlaySimultaneousSa(List<SpellAbility> activePlayerSAs) {
+        for (SpellAbility sa : orderSimultaneousSa(activePlayerSAs)) {
+            if (sa.isTrigger() && !sa.isCopied()) {
+                if (prepareTrigger(sa)) {
+                    ComputerUtil.playStack(sa, player, getGame());
+                }
+            } else {
+                super.orderAndPlaySimultaneousSa(List.of(sa)); // copies: Forge's handling
+            }
+        }
+    }
+
+    /**
+     * Modes and targets for a triggered ability (Forge's AI decides these heuristically). False if
+     * it can't be put on the stack, e.g. no legal targets.
+     */
+    private boolean prepareTrigger(SpellAbility sa) {
+        if (sa.getApi() == ApiType.Charm) {
+            if (!CharmEffect.makeChoices(sa)) {
+                return false;
+            }
+            if (!sa.hasParam("Random")) {
+                return true; // the chosen modes' targets were picked with the modes
+            }
+            sa = sa.getSubAbility();
+        }
+        if (sa.hasParam("TargetingPlayer")) {
+            Player targeting = AbilityUtils.getDefinedPlayers(sa.getHostCard(), sa.getParam("TargetingPlayer"), sa).get(0);
+            sa.setTargetingPlayer(targeting);
+            return targeting.getController().chooseTargetsFor(sa);
+        }
+        return chooseTargets(sa, "trigger targets");
+    }
+
+    /** The order simultaneous triggers go on the stack (last one resolves first). */
+    @Override
+    public List<SpellAbility> orderSimultaneousSa(List<SpellAbility> sas) {
+        if (sas.size() <= 1 || sas.size() > 4) {
+            return sas.size() <= 1 ? sas : super.orderSimultaneousSa(sas);
+        }
+        Equivalence eq = equivalence();
+        Map<String, List<SpellAbility>> orders = new LinkedHashMap<>();
+        for (List<SpellAbility> order : permutations(sas)) {
+            List<String> keys = new ArrayList<>();
+            for (SpellAbility sa : order) {
+                keys.add(eq.key(sa.getHostCard()) + ": " + sa.getDescription());
+            }
+            orders.putIfAbsent(String.join(" | ", keys), order);
+        }
+        List<List<SpellAbility>> distinct = new ArrayList<>(orders.values());
+        List<String> labels = new ArrayList<>();
+        for (List<SpellAbility> order : distinct) {
+            List<String> names = new ArrayList<>();
+            for (SpellAbility sa : order) {
+                names.add(sa.getHostCard().getName() + ": " + sa.getDescription());
+            }
+            String label = "Stack " + String.join(", then ", names);
+            labels.add(labels.contains(label) ? label + " (" + labels.size() + ")" : label);
+        }
+        return distinct.get(decide("trigger order", labels, false));
+    }
+
+    private static <T> List<List<T>> permutations(List<T> items) {
+        List<List<T>> out = new ArrayList<>();
+        if (items.size() <= 1) {
+            out.add(new ArrayList<>(items));
+            return out;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            List<T> rest = new ArrayList<>(items);
+            T first = rest.remove(i);
+            for (List<T> tail : permutations(rest)) {
+                tail.add(0, first);
+                out.add(tail);
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- position key

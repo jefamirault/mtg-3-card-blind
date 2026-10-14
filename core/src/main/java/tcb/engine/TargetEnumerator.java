@@ -14,13 +14,21 @@ import forge.game.zone.ZoneType;
 
 /**
  * Enumerates every legal target assignment for a spell or ability, including spells and abilities
- * on the stack (which Forge's AI target selector doesn't consider, so counterspells never fire).
+ * on the stack (which Forge's AI target selector doesn't consider, so counterspells never fire),
+ * and every way to divide an amount "as you choose" among the targets.
  *
- * An assignment holds one list of targets per targeting part of the ability chain, e.g. "destroy
+ * An assignment holds one {@link Part} per targeting part of the ability chain, e.g. "destroy
  * target creature, then deal 2 damage to target player" has two parts.
  */
 final class TargetEnumerator {
     private TargetEnumerator() {
+    }
+
+    /**
+     * The targets of one targeting part, and for "divided as you choose" parts the amount each
+     * target gets (same order as {@code targets}; null otherwise).
+     */
+    record Part(List<GameObject> targets, int[] division) {
     }
 
     /** Targeting parts of the chain whose conditions currently hold. */
@@ -40,16 +48,25 @@ final class TargetEnumerator {
     }
 
     /** All assignments (up to {@code cap}); leaves the ability's targets cleared. */
-    static List<List<List<GameObject>>> enumerate(SpellAbility sa, int cap) {
+    static List<List<Part>> enumerate(SpellAbility sa, int cap) {
         List<SpellAbility> parts = targetingParts(sa);
-        List<List<List<GameObject>>> out = new ArrayList<>();
+        List<List<Part>> out = new ArrayList<>();
         recurse(parts, 0, new ArrayList<>(), out, cap);
         clear(parts);
         return out;
     }
 
-    private static void recurse(List<SpellAbility> parts, int i, List<List<GameObject>> chosen,
-                                List<List<List<GameObject>>> out, int cap) {
+    /** True if every targeting part of the chain has a valid number of targets. */
+    static boolean valid(SpellAbility sa) {
+        for (SpellAbility part : targetingParts(sa)) {
+            if (!part.isTargetNumberValid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void recurse(List<SpellAbility> parts, int i, List<Part> chosen, List<List<Part>> out, int cap) {
         if (out.size() >= cap) {
             return;
         }
@@ -58,23 +75,54 @@ final class TargetEnumerator {
             return;
         }
         SpellAbility part = parts.get(i);
-        part.resetTargets();
+        part.clearTargets();
         List<GameObject> candidates = candidates(part);
         int min = part.getMinTargets();
         int max = Math.min(part.getMaxTargets(), candidates.size());
         for (List<GameObject> subset : subsets(candidates, min, max, cap)) {
-            part.resetTargets();
-            for (GameObject o : subset) {
-                part.getTargets().add(o);
-            }
-            chosen.add(subset);
-            recurse(parts, i + 1, chosen, out, cap);
-            chosen.remove(chosen.size() - 1);
-            if (out.size() >= cap) {
-                return;
+            for (int[] division : divisions(part, subset.size())) {
+                Part p = new Part(subset, division);
+                apply(part, p);
+                chosen.add(p);
+                recurse(parts, i + 1, chosen, out, cap);
+                chosen.remove(chosen.size() - 1);
+                if (out.size() >= cap) {
+                    return;
+                }
             }
         }
-        part.resetTargets();
+        part.clearTargets();
+    }
+
+    /**
+     * Ways to divide a "divided as you choose" amount among {@code n} targets, at least 1 each;
+     * a single null (no division) for other parts.
+     */
+    private static List<int[]> divisions(SpellAbility part, int n) {
+        List<int[]> out = new ArrayList<>();
+        if (!part.isDividedAsYouChoose() || n == 0) {
+            out.add(null);
+            return out;
+        }
+        part.clearTargets(); // also recomputes the amount to divide
+        int total = part.getStillToDivide();
+        if (total < n) {
+            return out; // can't give every target at least 1
+        }
+        compose(total, new int[n], 0, out);
+        return out;
+    }
+
+    private static void compose(int left, int[] cur, int i, List<int[]> out) {
+        if (i == cur.length - 1) {
+            cur[i] = left;
+            out.add(cur.clone());
+            return;
+        }
+        for (int x = 1; x <= left - (cur.length - 1 - i); x++) {
+            cur[i] = x;
+            compose(left - x, cur, i + 1, out);
+        }
     }
 
     private static List<GameObject> candidates(SpellAbility part) {
@@ -125,34 +173,41 @@ final class TargetEnumerator {
         }
     }
 
-    /** Sets the ability's targets to {@code assignment}. */
-    static void apply(SpellAbility sa, List<List<GameObject>> assignment) {
+    /** Sets the ability's targets (and divisions) to {@code assignment}. */
+    static void apply(SpellAbility sa, List<Part> assignment) {
         List<SpellAbility> parts = targetingParts(sa);
         if (parts.size() != assignment.size()) {
             throw new IllegalStateException("target parts changed for " + sa);
         }
         for (int i = 0; i < parts.size(); i++) {
-            SpellAbility part = parts.get(i);
-            part.resetTargets();
-            for (GameObject o : assignment.get(i)) {
-                part.getTargets().add(o);
+            apply(parts.get(i), assignment.get(i));
+        }
+    }
+
+    private static void apply(SpellAbility part, Part p) {
+        part.clearTargets();
+        for (int k = 0; k < p.targets().size(); k++) {
+            GameObject o = p.targets().get(k);
+            part.getTargets().add(o);
+            if (p.division() != null) {
+                part.addDividedAllocation(o, p.division()[k]);
             }
         }
     }
 
     static void clear(List<SpellAbility> parts) {
         for (SpellAbility part : parts) {
-            part.resetTargets();
+            part.clearTargets();
         }
     }
 
     /** Equal keys mean the assignments are interchangeable: the same targets up to {@link Equivalence}. */
-    static String key(List<List<GameObject>> assignment, Equivalence eq) {
+    static String key(List<Part> assignment, Equivalence eq) {
         List<String> parts = new ArrayList<>();
-        for (List<GameObject> targets : assignment) {
+        for (Part p : assignment) {
             List<String> keys = new ArrayList<>();
-            for (GameObject o : targets) {
-                keys.add(eq.key(o));
+            for (int k = 0; k < p.targets().size(); k++) {
+                keys.add(eq.key(p.targets().get(k)) + (p.division() == null ? "" : " x" + p.division()[k]));
             }
             Collections.sort(keys);
             parts.add(String.join(" & ", keys));
@@ -160,12 +215,12 @@ final class TargetEnumerator {
         return String.join("; ", parts);
     }
 
-    static String describe(List<List<GameObject>> assignment) {
+    static String describe(List<Part> assignment) {
         List<String> parts = new ArrayList<>();
-        for (List<GameObject> targets : assignment) {
+        for (Part p : assignment) {
             List<String> names = new ArrayList<>();
-            for (GameObject o : targets) {
-                names.add(describe(o));
+            for (int k = 0; k < p.targets().size(); k++) {
+                names.add(describe(p.targets().get(k)) + (p.division() == null ? "" : ": " + p.division()[k]));
             }
             parts.add(names.isEmpty() ? "no target" : String.join(" & ", names));
         }

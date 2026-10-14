@@ -66,9 +66,12 @@ Search options shared by `solve` and `tournament`:
 | `--time` | 10m | Time per game before giving up |
 | `--first-turns` | off | Iteratively deepen the turn limit from here (doubling), so a game that runs out of budget still has a result proven to a shorter limit |
 | `--exact-turns` | off | Turn-aware transposition table (see limitations) |
+| `--exhaustive` | off | Branch on every option: don't merge options that only swap identical cards, or skip repeated priority windows (slower; for checking results) |
 | `--threads` | CPUs | Games solved in parallel (`tournament` only) |
 
-Results that hit the budget are marked "unproven beyond turn N".
+Results that hit the budget are marked "unproven beyond turn N". While a tournament runs, the web
+UI shows each game being solved with its node count, elapsed time and how much of its budget it
+has used.
 
 ## How it works
 
@@ -79,22 +82,38 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   game. To expand a node, the solver starts a fresh, seeded Forge game and replays that list.
   This uses Forge's real game loop, so the state is always exact. Forge's own game-copying code
   drops parts of the state, such as abilities on the stack.
+  - Each game runs on its own thread and *pauses* at the first new decision. The first option
+    explored there continues the paused game; only the other options replay from turn 1.
+  - A replay doesn't list the options of decisions where the recorded choice is "Pass" (most of
+    them), which skips most of the mana and target checks.
 - **Every choice is a branch.** `SolverController` is a Forge player controller that turns each
   decision into a branch point. That covers:
-  - spells and abilities at every priority stop, with every legal set of targets (including
-    spells on the stack, so counterspells work)
-  - attack and block assignments
+  - spells and abilities at every priority stop, with every value of X and every legal set of
+    targets (including spells on the stack, so counterspells work, and every way to divide
+    "divided as you choose" damage)
+  - targets of triggered abilities and of chosen modes, and the order of simultaneous triggers
+  - which permanents pay a mana cost
+  - attack and block assignments, and how combat damage is divided among blockers (and trample)
+  - leylines and other opening-hand actions
   - optional costs and "may" abilities
-  - numbers, modes and single-card choices
+  - numbers, modes and card choices. Choices with more than 64 options are made in steps
+    (first a range, then an option in it; or one card at a time).
 
   An unexplored decision stops the game with a signal, so the search can expand it.
 - **Random events** pass through a replaceable random source (`ChanceRandom`). While a spell or
   ability resolves, each random draw becomes a chance node.
+- **Fewer branches.** Options that differ only in which of several identical cards they use
+  (which Memnite attacks, which identical creature a removal spell hits) are one option. A card
+  that anything refers to (attachments, remembered cards, targets on the stack, ...) is never
+  merged. The draw step when nobody drew, and the end of combat step right after combat damage,
+  offer nothing the step before didn't, so nobody acts there. `--exhaustive` turns this off, and
+  the tests check it doesn't change results.
 - **Search.**
   - Deterministic games: two null-window alpha-beta passes ("can A force a win?", then "can B
     force a win?"). These are fast because most 3CB games are draws.
   - Games with randomness: a full expectimax search.
-  - Both use a transposition table keyed on Forge's own game-state dump.
+  - Both use a transposition table keyed on Forge's own game-state dump, plus each permanent's
+    current characteristics (the dump leaves out temporary changes, such as an animated land).
   - A position that repeats along a line counts as a draw. This is checked at decision points,
     and once per turn inside each replay, so a game with no meaningful decisions left ends
     quickly instead of running to the turn limit.
@@ -104,6 +123,11 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   3. per-thread, resettable id counters for abilities, triggers and effects. The stock counters
      are shared, non-atomic statics, so parallel games could hand out duplicate ids. Resetting
      them before every replay also keeps replays identical.
+  4. a per-thread `AiCache`. The stock cache is global and only cleared inside the AI's own
+     priority decision, which the solver replaces, so it kept every game ever played in memory.
+
+  The launchers run Java with `-XX:+DisableExplicitGC`: Forge calls `System.gc()` after every
+  finished game, which stalls every solver thread.
 
 Layout:
 
@@ -116,7 +140,12 @@ forge/  Forge submodule;  patches/  patches applied to it
 examples/decks/  sample entries
 ```
 
-Tests: `mise exec -- mvn test` (the solver tests take a few minutes).
+Tests: `mise exec -- mvn test` (about three minutes).
+
+Benchmarks: `./tcb solve examples/decks/goblin-guide.txt examples/decks/swords.txt` (a draw,
+about 1,300 nodes per game) and `./tcb solve examples/bench/memnite.txt examples/bench/treetop.txt`
+(identical creatures against a manland, removal and a bounce land at every stop; about 14,000
+nodes per game).
 
 ## Known limitations
 
@@ -126,13 +155,17 @@ Tests: `mise exec -- mvn test` (the solver tests take a few minutes).
     turn limit. Use `--exact-turns` to rule that out.
   - Repetition draws found along one line can leak into table entries reused elsewhere (the
     usual "graph history" caveat).
-- **Choices left to Forge's AI.** These still use the AI's heuristics instead of branching:
-  - targets of *triggered* abilities
-  - X values when casting
-  - mana payment (which permanents to tap)
-  - damage assignment order
-  - leylines and other opening-hand actions
-  - choices with more than 64 options (for example, picking a subset from a large set)
+- **Choices left to Forge's AI.** A few decisions still use the AI's heuristics instead of
+  branching:
+  - which colour a mana ability produces, and paying with sources that don't tap (e.g. a
+    sacrifice-only ability)
+  - legacy damage assignment order (off under current rules), and "divided as you choose"
+    combat damage (Thorn Elemental and friends)
+  - attacks and blocks with more than 64 possible assignments, and modes that can repeat
+  - X above 20
+- **Mana payment** is branched by setting the other mana sources aside (marked tapped without any
+  game event) while Forge's AI pays from the chosen ones. A card that cares how many permanents
+  are untapped *during* the payment would see the wrong number.
 - **Randomness.**
   - Random events with more than 16 outcomes, and randomness outside resolving spells and
     abilities, use a fixed seed instead of branching.
@@ -140,5 +173,6 @@ Tests: `mise exec -- mvn test` (the solver tests take a few minutes).
 - **Legality.** Forge's Vintage list is used, plus a check that rejects cards whose only legal-set
   printings are acorn/Un-cards (for example Blacker Lotus's Secret Lair printing).
 - **Rules accuracy is Forge's.** A card that is scripted wrong in Forge is played wrong here.
-- **Speed.** Each node costs a game replay (a few milliseconds), so decks with many options at
-  instant speed take longest. Most matchups finish in seconds to a minute on one core.
+- **Speed.** Replaying a node costs a few milliseconds plus about 1 ms per turn played, so decks
+  with many options at instant speed take longest. Most matchups finish in seconds to a minute
+  on one core; the example tournament takes under a minute on 32 cores.
