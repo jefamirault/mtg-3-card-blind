@@ -69,7 +69,7 @@
   /* --- entries as hands of three --- */
   .entries { list-style: none; margin: 0; padding: 0; }
   .entry {
-    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .9rem;
+    display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: .9rem;
     padding: .9rem 0; border-top: 1px solid var(--rule);
   }
   .entry-name { font-weight: 600; }
@@ -91,6 +91,10 @@
   .card:nth-child(3) { transform: rotate(7deg); }
   .card-name { display: block; border-bottom: 1px solid var(--rule); padding-bottom: .2rem; }
   .entry.illegal .card { border-style: dashed; }
+  .entry input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--action); cursor: pointer; }
+  .entry.left-out .hand, .entry.left-out .entry-name { opacity: .45; }
+  .pick { display: flex; align-items: baseline; gap: .5rem; font-size: .9rem; color: var(--ink-soft); margin: 0 0 .5rem; }
+  .pick button { border: 0; background: none; color: var(--action); cursor: pointer; padding: 0; text-decoration: underline; }
 
   /* --- results --- */
   .empty { color: var(--ink-soft); max-width: 50ch; }
@@ -137,6 +141,19 @@
   ol.line { margin: 0 0 .8rem; padding-left: 1.6rem; font-size: .9rem; color: var(--ink-soft); }
   ol.line li.end { list-style: none; color: var(--ink); font-weight: 600; margin-left: -1.6rem; }
 
+  /* --- saved tournaments --- */
+  .history { list-style: none; margin: 0 0 1.5rem; padding: 0; max-height: 13rem; overflow: auto; border-top: 1px solid var(--rule); }
+  .history li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .6rem; border-bottom: 1px solid var(--rule); }
+  .history .view {
+    border: 0; background: none; cursor: pointer; text-align: left; padding: .45rem .5rem;
+    display: flex; flex-wrap: wrap; gap: .1rem .8rem; align-items: baseline;
+  }
+  .history .view:hover { background: var(--stock); }
+  .history li[aria-current=true] { background: var(--stock); box-shadow: inset 3px 0 0 var(--action); }
+  .history .when { font-weight: 600; }
+  .history .summary { font-size: .88rem; color: var(--ink-soft); }
+  .shown-head { font-size: .9rem; color: var(--ink-soft); margin: 0 0 .9rem; }
+
   @media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }
 </style>
 </head>
@@ -165,12 +182,16 @@
       <ul class="problems" id="add-problems" aria-live="polite"></ul>
       <button class="primary" type="submit">Add entry</button>
     </form>
+    <p class="pick" id="pick" hidden><span id="pick-count"></span>
+      <button type="button" id="pick-all">All</button><button type="button" id="pick-none">None</button></p>
     <ul class="entries" id="entries"></ul>
   </section>
 
   <section aria-labelledby="results-h">
     <h2 id="results-h">Results</h2>
     <ul class="problems" id="run-problems" aria-live="polite"></ul>
+    <div id="live"></div>
+    <ul class="history" id="history" aria-label="Past tournaments" hidden></ul>
     <div id="results"></div>
   </section>
 </main>
@@ -214,6 +235,39 @@ for (const input of document.querySelectorAll(".slots input")) {
 }
 
 // ---- entries
+// Entries left out of the next tournament. Remembering the left-out ones (not the chosen ones)
+// means a new entry starts out included.
+let entryNames = [];
+let tournamentState = "idle";
+const leftOut = new Set((() => {
+  try { return JSON.parse(localStorage.getItem("tcb.leftOut")) || []; } catch { return []; }
+})());
+const chosen = () => entryNames.filter((n) => !leftOut.has(n));
+function saveLeftOut() {
+  try { localStorage.setItem("tcb.leftOut", JSON.stringify([...leftOut])); } catch { /* not remembered */ }
+}
+
+function updatePick() {
+  const n = chosen().length;
+  $("#pick").hidden = entryNames.length === 0;
+  $("#pick-count").textContent = `${n} of ${entryNames.length} entries in the tournament:`;
+  for (const box of document.querySelectorAll("#entries input[type=checkbox]")) {
+    box.checked = !leftOut.has(box.value);
+    box.closest(".entry").classList.toggle("left-out", !box.checked);
+  }
+  const running = tournamentState === "running";
+  $("#run").disabled = running || n < 2;
+  $("#run").textContent = running ? "Solving…" : `Run tournament (${n * (n - 1)} games)`;
+}
+
+function pickAll(include) {
+  for (const n of entryNames) include ? leftOut.delete(n) : leftOut.add(n);
+  saveLeftOut();
+  updatePick();
+}
+$("#pick-all").addEventListener("click", () => pickAll(true));
+$("#pick-none").addEventListener("click", () => pickAll(false));
+
 function hand(cards) {
   return el("div", { class: "hand", "aria-label": cards.join(", ") },
     ...cards.map((c) => el("div", { class: "card" }, el("span", { class: "card-name" }, c))));
@@ -222,8 +276,10 @@ function hand(cards) {
 async function loadEntries() {
   const { data } = await api("GET", "/api/entries");
   const list = $("#entries");
+  entryNames = data.map((e) => e.name);
   if (!data.length) {
     list.replaceChildren(el("li", { class: "empty" }, "No entries yet. Add the first one above."));
+    updatePick();
     return;
   }
   list.replaceChildren(...data.map((e) => {
@@ -233,12 +289,20 @@ async function loadEntries() {
       await api("DELETE", "/api/entries/" + encodeURIComponent(e.name));
       loadEntries();
     });
+    const include = el("input", { type: "checkbox", value: e.name, "aria-label": "Include " + e.name + " in the tournament" });
+    include.addEventListener("change", () => {
+      include.checked ? leftOut.delete(e.name) : leftOut.add(e.name);
+      saveLeftOut();
+      updatePick();
+    });
     return el("li", { class: "entry" + (illegal ? " illegal" : "") },
+      include,
       hand(e.cards),
       el("div", {}, el("div", { class: "entry-name" }, e.name),
         illegal ? el("div", { class: "entry-note" }, e.problems.join("; ")) : null),
       remove);
   }));
+  updatePick();
 }
 
 $("#add").addEventListener("submit", async (ev) => {
@@ -254,23 +318,84 @@ $("#add").addEventListener("submit", async (ev) => {
 
 // ---- tournament
 $("#run").addEventListener("click", async () => {
-  const { ok, data } = await api("POST", "/api/tournament");
+  const { ok, data } = await api("POST", "/api/tournament", { entries: chosen() });
   showProblems($("#run-problems"), ok ? [] : data.problems || [data.error]);
-  if (ok) poll();
+  if (ok) { viewing = null; poll(); }
 });
 
 let pollTimer;
 async function poll() {
   clearTimeout(pollTimer);
   const { data } = await api("GET", "/api/tournament");
+  if (tournamentState === "running" && data.state !== "running") {
+    viewing = null; // show the tournament that just finished
+    await loadHistory();
+  }
   render(data);
   if (data.state === "running") pollTimer = setTimeout(poll, 2000);
 }
 
-function render(status) {
+// ---- saved tournaments
+let history = [];
+let viewing = null; // id of the saved tournament picked from the list; null shows the newest
+const saved = new Map();
+const when = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+async function loadHistory() {
+  const { data } = await api("GET", "/api/history");
+  history = Array.isArray(data) ? data : [];
+  if (viewing && !history.some((h) => h.id === viewing)) viewing = null;
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = $("#history");
+  list.hidden = history.length === 0;
+  const shown = tournamentState === "running" && !viewing ? null : viewing || history[0]?.id;
+  list.replaceChildren(...history.map((h) => {
+    const view = el("button", { class: "view", type: "button" },
+      el("span", { class: "when" }, when(h.finished)),
+      el("span", { class: "summary" },
+        `${h.entries.length} entries, ${h.games} games in ${duration(h.seconds)} · ${h.leader} first with ${fmt(h.leaderPoints)} pts`));
+    view.addEventListener("click", () => { viewing = h.id; renderHistory(); showSaved(); });
+    const del = el("button", { class: "remove", type: "button", "aria-label": "Delete results from " + when(h.finished) }, "Delete");
+    del.addEventListener("click", async () => {
+      if (!confirm(`Delete the results from ${when(h.finished)}? This can't be undone.`)) return;
+      await api("DELETE", "/api/history/" + encodeURIComponent(h.id));
+      saved.delete(h.id);
+      await loadHistory();
+      showSaved();
+    });
+    return el("li", { "aria-current": String(h.id === shown) }, view, del);
+  }));
+}
+
+async function showSaved() {
   const out = $("#results");
-  $("#run").disabled = status.state === "running";
-  $("#run").textContent = status.state === "running" ? "Solving…" : "Run tournament";
+  const id = tournamentState === "running" && !viewing ? null : viewing || history[0]?.id;
+  if (!id) {
+    out.replaceChildren(tournamentState === "running" ? "" : el("p", { class: "empty" },
+      "Add at least two entries, tick the ones to play, then run the tournament. Each pair of decks plays two games, one with each on the play."));
+    return;
+  }
+  if (!saved.has(id)) {
+    const { ok, data } = await api("GET", "/api/history/" + encodeURIComponent(id));
+    if (!ok) { out.replaceChildren(el("p", { class: "problems" }, data.error)); return; }
+    saved.set(id, data);
+  }
+  const t = saved.get(id);
+  if (id !== (viewing || history[0]?.id)) return; // another tournament was picked meanwhile
+  out.replaceChildren(
+    el("p", { class: "shown-head" }, `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`),
+    ...renderResults(t.results));
+}
+
+function render(status) {
+  const out = $("#live");
+  tournamentState = status.state;
+  updatePick();
+  renderHistory();
+  showSaved();
   if (status.state === "running") {
     const done = status.progress.length;
     out.replaceChildren(
@@ -285,11 +410,7 @@ function render(status) {
     out.replaceChildren(el("p", { class: "problems" }, "The tournament stopped with an error: " + status.error));
     return;
   }
-  if (!status.results) {
-    out.replaceChildren(el("p", { class: "empty" }, "Add at least two entries, then run the tournament. Each pair of decks plays two games, one with each on the play."));
-    return;
-  }
-  out.replaceChildren(...renderResults(status.results));
+  out.replaceChildren();
 }
 
 const duration = (seconds) => {
@@ -370,7 +491,7 @@ function renderResults(r) {
 }
 
 loadEntries();
-poll();
+loadHistory().then(poll);
 </script>
 </body>
 </html>

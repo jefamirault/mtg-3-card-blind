@@ -49,7 +49,11 @@ Hypnotic Specter
 Open http://localhost:8080 to add entries (with card-name suggestions and legality checks),
 run the tournament, and browse the standings, the matchup matrix and the optimal line of every
 game. Entries are saved as deck files in the `--entries` folder, so the CLI can run the same
-field: `./tcb tournament entries`.
+field: `./tcb tournament entries`. The first time it runs (no `--entries` folder yet), it starts
+the folder with the sample decks in `examples/entries`. Tick the entries to include to run a
+tournament on just some of them. Each finished tournament is saved as a JSON file in the
+`--history` folder (default `history`); the page lists them, newest first, and lets you view or
+delete each one.
 
 ### CLI
 
@@ -137,7 +141,8 @@ core/   tcb.deck (deck lists, Vintage validation), tcb.engine (Forge integration
 cli/    the `tcb` command line
 web/    the web UI (JDK HTTP server + one static page)
 forge/  Forge submodule;  patches/  patches applied to it
-examples/decks/  sample entries
+examples/decks/  sample decks for the CLI
+examples/entries/  starter field for the web UI
 ```
 
 Tests: `mise exec -- mvn test` (about three minutes).

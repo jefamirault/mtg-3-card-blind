@@ -10,4 +10,5 @@ fi
 # -XX:+DisableExplicitGC: Forge calls System.gc() after every finished game, stalling every solver thread.
 exec java ${TCB_JAVA_OPTS:-} -Xss512m -XX:+DisableExplicitGC -Xmx${TCB_HEAP:-8g} \
     -Dtcb.forgeGuiDir="$root/forge/forge-gui" \
+    -Dtcb.samplesDir="$root/examples/entries" \
     -cp "$jar:$root/web/target/lib/*" tcb.web.WebServer "$@"

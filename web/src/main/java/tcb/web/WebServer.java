@@ -8,6 +8,9 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -41,15 +44,20 @@ import tcb.solve.Tournament;
 /**
  * Web front end: submit entries, run the tournament, browse results.
  * Entries are stored as deck files in a directory, so the CLI can use the same folder.
+ * Each finished tournament is saved as a JSON file in the history directory.
+ * On first launch (no entries directory yet) the entries start as copies of the deck files in
+ * the {@code tcb.samplesDir} system property's directory, if it's set.
  *
- * <pre>java ... tcb.web.WebServer [--port 8080] [--entries entries] [--threads N]</pre>
+ * <pre>java ... tcb.web.WebServer [--port 8080] [--entries entries] [--history history] [--threads N]</pre>
  */
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     private static final int MAX_NAME = 40;
     private static final Solver.Options OPTIONS = Solver.Options.defaults();
+    private static final DateTimeFormatter ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path entriesDir;
+    private final Path historyDir;
     private final int threads;
     private final List<String> cardNames;
 
@@ -62,8 +70,9 @@ public final class WebServer {
     private Map<String, Object> results;
     private String error;
 
-    WebServer(Path entriesDir, int threads) {
+    WebServer(Path entriesDir, Path historyDir, int threads) {
         this.entriesDir = entriesDir;
+        this.historyDir = historyDir;
         this.threads = threads;
         // Vintage-legal card names for autocomplete
         GameFormat vintage = FModel.getFormats().getVintage();
@@ -81,23 +90,42 @@ public final class WebServer {
     public static void main(String[] args) throws IOException {
         int port = 8080;
         Path entries = Path.of("entries");
+        Path history = Path.of("history");
         int threads = Runtime.getRuntime().availableProcessors();
         for (int i = 0; i + 1 < args.length; i += 2) {
             switch (args[i]) {
                 case "--port" -> port = Integer.parseInt(args[i + 1]);
                 case "--entries" -> entries = Path.of(args[i + 1]);
+                case "--history" -> history = Path.of(args[i + 1]);
                 case "--threads" -> threads = Integer.parseInt(args[i + 1]);
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
             }
         }
-        Files.createDirectories(entries);
+        if (!Files.exists(entries)) {
+            Files.createDirectories(entries);
+            copySamples(entries);
+        }
+        Files.createDirectories(history);
         ForgeEnv.init();
-        WebServer app = new WebServer(entries, threads);
+        WebServer app = new WebServer(entries, history, threads);
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", app::handle);
         server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
         System.err.println("3 Card Blind: http://localhost:" + port + "/  (entries in " + entries.toAbsolutePath() + ")");
+    }
+
+    /** Fills a new entries directory with the sample decks, so a fresh clone has a field to try. */
+    private static void copySamples(Path entries) throws IOException {
+        String dir = System.getProperty("tcb.samplesDir");
+        if (dir == null || !Files.isDirectory(Path.of(dir))) {
+            return;
+        }
+        try (Stream<Path> files = Files.list(Path.of(dir))) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".txt")).toList()) {
+                Files.copy(f, entries.resolve(f.getFileName()));
+            }
+        }
     }
 
     private void handle(HttpExchange ex) throws IOException {
@@ -118,6 +146,12 @@ public final class WebServer {
                 sendJson(ex, 200, status());
             } else if (path.equals("/api/tournament") && method.equals("POST")) {
                 startTournament(ex);
+            } else if (path.equals("/api/history") && method.equals("GET")) {
+                sendJson(ex, 200, listHistory());
+            } else if (path.startsWith("/api/history/") && method.equals("GET")) {
+                getHistory(ex, path.substring("/api/history/".length()));
+            } else if (path.startsWith("/api/history/") && method.equals("DELETE")) {
+                deleteHistory(ex, path.substring("/api/history/".length()));
             } else {
                 sendJson(ex, 404, Map.of("error", "Not found: " + method + " " + path));
             }
@@ -252,21 +286,35 @@ public final class WebServer {
         return out;
     }
 
+    /** Runs every entry, or only those named in the body's {@code entries} array. */
     private void startTournament(HttpExchange ex) throws IOException {
-        List<DeckList> entries = readEntries();
+        List<DeckList> all = readEntries();
+        List<DeckList> entries = all;
         List<String> problems = new ArrayList<>();
+        JsonObject body = GSON.fromJson(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8), JsonObject.class);
+        if (body != null && body.has("entries")) {
+            Set<String> chosen = new TreeSet<>();
+            body.getAsJsonArray("entries").forEach(n -> chosen.add(n.getAsString()));
+            for (String name : chosen) {
+                if (all.stream().noneMatch(d -> d.name().equals(name))) {
+                    problems.add("No entry called " + name + ".");
+                }
+            }
+            entries = all.stream().filter(d -> chosen.contains(d.name())).toList();
+        }
         for (DeckList d : entries) {
             for (String p : VintageValidator.problems(d)) {
                 problems.add(d.name() + ": " + p);
             }
         }
         if (entries.size() < 2) {
-            problems.add("Add at least two entries to run a tournament.");
+            problems.add("Choose at least two entries to run a tournament.");
         }
         if (!problems.isEmpty()) {
             sendJson(ex, 400, Map.of("problems", problems));
             return;
         }
+        List<DeckList> field = entries;
         synchronized (this) {
             if (state.equals("running")) {
                 sendJson(ex, 409, Map.of("problems", List.of("A tournament is already running.")));
@@ -275,17 +323,25 @@ public final class WebServer {
             state = "running";
             progress.clear();
             running.clear();
-            tournamentEntries = entries;
-            totalGames = entries.size() * (entries.size() - 1);
+            tournamentEntries = field;
+            totalGames = field.size() * (field.size() - 1);
             results = null;
             error = null;
         }
         Thread runner = new Thread(() -> {
             try {
-                Tournament.Results r = Tournament.run(entries, OPTIONS, threads, progress::add, running);
+                long start = System.nanoTime();
+                Tournament.Results r = Tournament.run(field, OPTIONS, threads, progress::add, running);
+                Map<String, Object> json = ResultsJson.toJson(r);
+                save(json, Duration.ofNanos(System.nanoTime() - start));
                 synchronized (this) {
-                    results = ResultsJson.toJson(r);
+                    results = json;
                     state = "done";
+                }
+            } catch (IOException e) {
+                synchronized (this) {
+                    error = "Solved, but couldn't save the results: " + e.getMessage();
+                    state = "failed";
                 }
             } catch (RuntimeException e) {
                 synchronized (this) {
@@ -297,6 +353,71 @@ public final class WebServer {
         runner.setDaemon(true);
         runner.start();
         sendJson(ex, 202, status());
+    }
+
+    // ---- saved tournaments
+
+    /** Writes a finished tournament to the history directory, named by when it finished. */
+    private synchronized void save(Map<String, Object> results, Duration elapsed) throws IOException {
+        String base = LocalDateTime.now().format(ID_FORMAT);
+        String id = base;
+        for (int n = 2; Files.exists(historyFile(id)); n++) {
+            id = base + "-" + n;
+        }
+        Map<String, Object> saved = new LinkedHashMap<>();
+        saved.put("id", id);
+        saved.put("finished", LocalDateTime.now().withNano(0).toString());
+        saved.put("seconds", elapsed.toMillis() / 1000.0);
+        saved.put("results", results);
+        Files.writeString(historyFile(id), GSON.toJson(saved));
+    }
+
+    /** Summaries of the saved tournaments, newest first. */
+    private List<Map<String, Object>> listHistory() throws IOException {
+        List<Map<String, Object>> out = new ArrayList<>();
+        try (Stream<Path> files = Files.list(historyDir)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".json")).sorted(Comparator.reverseOrder()).toList()) {
+                JsonObject saved = GSON.fromJson(Files.readString(f), JsonObject.class);
+                JsonObject results = saved.getAsJsonObject("results");
+                List<String> entries = new ArrayList<>();
+                results.getAsJsonArray("entries").forEach(e -> entries.add(e.getAsJsonObject().get("name").getAsString()));
+                JsonObject top = results.getAsJsonArray("standings").get(0).getAsJsonObject();
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", saved.get("id").getAsString());
+                m.put("finished", saved.get("finished").getAsString());
+                m.put("seconds", saved.get("seconds").getAsDouble());
+                m.put("entries", entries);
+                m.put("games", results.getAsJsonArray("games").size());
+                m.put("leader", top.get("name").getAsString());
+                m.put("leaderPoints", top.get("points").getAsDouble());
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private void getHistory(HttpExchange ex, String id) throws IOException {
+        if (!validId(id) || !Files.exists(historyFile(id))) {
+            sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
+            return;
+        }
+        sendJson(ex, 200, GSON.fromJson(Files.readString(historyFile(id)), JsonObject.class));
+    }
+
+    private void deleteHistory(HttpExchange ex, String id) throws IOException {
+        if (!validId(id) || !Files.deleteIfExists(historyFile(id))) {
+            sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
+            return;
+        }
+        sendJson(ex, 200, Map.of("removed", id));
+    }
+
+    private static boolean validId(String id) {
+        return id.matches("[0-9]{8}-[0-9]{6}(-[0-9]+)?");
+    }
+
+    private Path historyFile(String id) {
+        return historyDir.resolve(id + ".json");
     }
 
     private static Map<String, String> query(HttpExchange ex) {
