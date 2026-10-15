@@ -39,9 +39,12 @@ it safely.
 
 ## Checking a change
 
-- Results: run `./tcb tournament examples/decks --json out.json` before and after a change, and
-  compare every game's pWinA/pDraw/pWinB. All 42 should match unless the change is meant to fix a
+- Results: run `./tcb tournament examples/decks --no-cache --json out.json` before and after a
+  change, and compare every game's pWinA/pDraw/pWinB. All 42 should match unless the change is meant to fix a
   result.
+- The result cache (`cache/`, `ResultCache`) is keyed on a hash of the Forge and `tcb-core` class
+  files, so a code change invalidates it, but use `--no-cache` for comparisons and timings anyway.
+  If something other than those classes starts to affect results, add it to the key.
 - Speed: benchmark matchups are Goblin Guide vs Swords (`examples/decks`) and Memnite vs
   Treetop/Putrefy (`examples/bench`). Compare node counts as well as time.
 - Profiling: this machine has a JRE without `jfr`/`jcmd`/`javac`. Record with

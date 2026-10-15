@@ -63,6 +63,15 @@ finished games are kept and saved, and the rest are listed as not played.
 found, then a matrix showing the points each deck scored against each other deck, then the
 standings. `--json` also writes the optimal line for every game.
 
+Solved games are saved in a cache folder (`--cache`, default `cache`), one JSON file per game,
+and later tournaments reuse them, so adding an entry only solves the new pairings. A game is
+keyed on both decks' cards (not their names or card order), who's on the play, `--max-turns`,
+`--exact-turns`, `--exhaustive` and a fingerprint of the compiled Forge and solver code (plus the
+Forge commit), so rebuilding after any code change starts afresh. A result that hit its budget is
+reused only by runs with no bigger a budget. `--no-cache` solves every game and saves nothing. The
+web UI uses the same cache (`./tcb-web --cache DIR`, or `--no-cache`) and marks reused games as
+*cached*.
+
 Search options shared by `solve` and `tournament`:
 
 | Option | Default | Meaning |

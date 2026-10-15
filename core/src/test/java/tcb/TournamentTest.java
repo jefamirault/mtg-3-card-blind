@@ -40,7 +40,7 @@ class TournamentTest {
     void stopBeforeStartPlaysNothing() {
         Tournament.Stop stop = new Tournament.Stop();
         stop.request();
-        Results r = Tournament.run(FIELD, OPTS, 2, line -> { }, ConcurrentHashMap.newKeySet(), stop);
+        Results r = Tournament.run(FIELD, OPTS, 2, line -> { }, ConcurrentHashMap.newKeySet(), stop, null);
         assertEquals(0, r.games().size());
         assertEquals(6, r.notPlayed().size());
         assertFalse(r.allComplete());
@@ -51,7 +51,7 @@ class TournamentTest {
     void stopKeepsFinishedGames() {
         // One thread, so games run in order: stopping after the first leaves the other five unplayed.
         Tournament.Stop stop = new Tournament.Stop();
-        Results r = Tournament.run(FIELD, OPTS, 1, line -> stop.request(), ConcurrentHashMap.newKeySet(), stop);
+        Results r = Tournament.run(FIELD, OPTS, 1, line -> stop.request(), ConcurrentHashMap.newKeySet(), stop, null);
         assertEquals(1, r.games().size());
         assertTrue(r.games().get(0).result().complete());
         assertEquals(5, r.notPlayed().size());

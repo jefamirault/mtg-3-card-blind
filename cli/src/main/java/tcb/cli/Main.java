@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import com.google.gson.GsonBuilder;
@@ -24,6 +25,7 @@ import tcb.engine.ForgeEnv;
 import tcb.solve.Solver;
 import tcb.solve.Solver.GameResult;
 import tcb.solve.Tournament;
+import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Tournament.Results;
 import tcb.solve.Tournament.Standing;
@@ -154,6 +156,12 @@ public final class Main {
         @Option(names = "--json", description = "Also write full results (including optimal lines) to this file")
         Path json;
 
+        @Option(names = "--cache", defaultValue = "cache", description = "Folder of solved games: games solved before are reused, new ones are saved. Default: ${DEFAULT-VALUE}")
+        Path cache;
+
+        @Option(names = "--no-cache", description = "Solve every game and don't save results to the cache.")
+        boolean noCache;
+
         @CommandLine.Mixin
         SearchOptions search;
 
@@ -168,7 +176,8 @@ public final class Main {
                 OUT.println("Need at least two decks.");
                 return 1;
             }
-            Results results = Tournament.run(entries, search.toOptions(), threads, msg -> OUT.println("  " + msg));
+            Results results = Tournament.run(entries, search.toOptions(), threads, msg -> OUT.println("  " + msg),
+                    ConcurrentHashMap.newKeySet(), new Tournament.Stop(), noCache ? null : new ResultCache(cache));
             printMatrix(results);
             printStandings(results);
             if (json != null) {

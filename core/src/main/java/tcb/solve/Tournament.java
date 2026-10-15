@@ -26,8 +26,12 @@ public final class Tournament {
     public static final int WIN_POINTS = 3;
     public static final int DRAW_POINTS = 1;
 
-    /** One solved game; {@code result.value()} is from deck {@code a}'s point of view. */
-    public record Game(int a, int b, int startingPlayer, GameResult result) {
+    /**
+     * One solved game; {@code result.value()} is from deck {@code a}'s point of view.
+     *
+     * @param cached true if the result came from the {@link ResultCache} instead of a search
+     */
+    public record Game(int a, int b, int startingPlayer, GameResult result, boolean cached) {
         /** Expected points for {@code entry} (which must be a or b). */
         public double pointsFor(int entry) {
             return WIN_POINTS * winChance(entry) + DRAW_POINTS * result.pDraw();
@@ -115,7 +119,7 @@ public final class Tournament {
     }
 
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress) {
-        return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet(), new Stop());
+        return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet(), new Stop(), null);
     }
 
     /**
@@ -123,9 +127,10 @@ public final class Tournament {
      * @param running  games currently being solved: each is added when its search starts and
      *                 removed after its line has gone to {@code progress}. Must be thread-safe.
      * @param stop     to stop the tournament early from another thread
+     * @param cache    solved games to reuse, and where to save new ones; null to solve every game
      */
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress,
-                              Collection<Running> running, Stop stop) {
+                              Collection<Running> running, Stop stop, ResultCache cache) {
         for (DeckList deck : entries) {
             VintageValidator.requireLegal(deck);
         }
@@ -146,33 +151,40 @@ public final class Tournament {
                             if (stop.requested()) {
                                 return null;
                             }
-                            GameResult r;
+                            GameResult r = cache == null ? null : cache.get(entries.get(a), entries.get(b), s, options);
+                            boolean cached = r != null;
                             Running live = null;
-                            try {
-                                Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
-                                live = new Running(a, b, s, solver);
-                                running.add(live);
-                                stop.register(solver);
+                            if (!cached) {
                                 try {
-                                    r = solver.solve();
-                                } finally {
-                                    stop.unregister(solver);
+                                    Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
+                                    live = new Running(a, b, s, solver);
+                                    running.add(live);
+                                    stop.register(solver);
+                                    try {
+                                        r = solver.solve();
+                                    } finally {
+                                        stop.unregister(solver);
+                                    }
+                                    if (solver.cancelled() && !r.complete()) {
+                                        running.remove(live);
+                                        return null;
+                                    }
+                                    if (cache != null) {
+                                        cache.put(entries.get(a), entries.get(b), s, options, r);
+                                    }
+                                } catch (RuntimeException e) {
+                                    // Don't lose the whole tournament to one game: score it as an unproven draw.
+                                    r = new GameResult(0, 1, 0, 0, false, List.of("solver error: " + e.getMessage()),
+                                            0, java.time.Duration.ZERO);
                                 }
-                                if (solver.cancelled() && !r.complete()) {
-                                    running.remove(live);
-                                    return null;
-                                }
-                            } catch (RuntimeException e) {
-                                // Don't lose the whole tournament to one game: score it as an unproven draw.
-                                r = new GameResult(0, 1, 0, 0, false, List.of("solver error: " + e.getMessage()),
-                                        0, java.time.Duration.ZERO);
                             }
-                            Game game = new Game(a, b, s, r);
-                            progress.accept(String.format("%s vs %s (%s on the play): %s%s",
+                            Game game = new Game(a, b, s, r, cached);
+                            progress.accept(String.format("%s vs %s (%s on the play): %s%s%s",
                                     entries.get(a).name(), entries.get(b).name(),
                                     entries.get(s == 0 ? a : b).name(),
                                     r.describe().replace("A ", entries.get(a).name() + " ").replace("B ", entries.get(b).name() + " "),
-                                    r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")"));
+                                    r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")",
+                                    cached ? " (cached)" : ""));
                             if (live != null) {
                                 running.remove(live);
                             }

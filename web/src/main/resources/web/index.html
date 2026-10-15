@@ -167,6 +167,7 @@
   .verdict { font-weight: 600; }
   .verdict.win { color: var(--win); } .verdict.loss { color: var(--loss); } .verdict.draw { color: var(--ink-soft); }
   .unproven { font-size: .8rem; color: var(--loss); }
+  .cached { font-size: .8rem; color: var(--ink-soft); }
   ol.line { margin: 0 0 .8rem; padding-left: 1.6rem; font-size: .9rem; color: var(--ink-soft); }
   ol.line li.end { list-style: none; color: var(--ink); font-weight: 600; margin-left: -1.6rem; }
 
@@ -587,7 +588,8 @@ function renderResults(r) {
       el("summary", {},
         el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
         el("span", { class: "verdict " + cls }, verdict),
-        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurnLimit}`)),
+        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurnLimit}`),
+        g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
       el("ol", { class: "line" }, ...steps));
   });
 

@@ -57,6 +57,7 @@ public final class ResultsJson {
             m.put("provenTurnLimit", g.result().provenTurnLimit());
             m.put("nodes", g.result().nodes());
             m.put("seconds", g.result().elapsed().toMillis() / 1000.0);
+            m.put("cached", g.cached());
             m.put("line", g.result().principalVariation());
             games.add(m);
         }

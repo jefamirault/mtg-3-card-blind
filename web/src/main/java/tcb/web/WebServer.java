@@ -37,6 +37,7 @@ import forge.model.FModel;
 import tcb.deck.DeckList;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
+import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Solver;
 import tcb.solve.Tournament;
@@ -48,7 +49,7 @@ import tcb.solve.Tournament;
  * On first launch (no entries directory yet) the entries start as copies of the deck files in
  * the {@code tcb.samplesDir} system property's directory, if it's set.
  *
- * <pre>java ... tcb.web.WebServer [--port 8080] [--entries entries] [--history history] [--threads N]</pre>
+ * <pre>java ... tcb.web.WebServer [--port 8080] [--entries entries] [--history history] [--cache cache | --no-cache] [--threads N]</pre>
  */
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
@@ -61,6 +62,8 @@ public final class WebServer {
 
     private final Path entriesDir;
     private final Path historyDir;
+    /** Solved games to reuse; null with --no-cache. */
+    private final ResultCache cache;
     private final int threads;
     private final List<String> cardNames;
 
@@ -75,9 +78,10 @@ public final class WebServer {
     private Map<String, Object> results;
     private String error;
 
-    WebServer(Path entriesDir, Path historyDir, int threads) {
+    WebServer(Path entriesDir, Path historyDir, ResultCache cache, int threads) {
         this.entriesDir = entriesDir;
         this.historyDir = historyDir;
+        this.cache = cache;
         this.threads = threads;
         // Vintage-legal card names for autocomplete
         GameFormat vintage = FModel.getFormats().getVintage();
@@ -96,14 +100,24 @@ public final class WebServer {
         int port = 8080;
         Path entries = Path.of("entries");
         Path history = Path.of("history");
+        Path cache = Path.of("cache");
         int threads = Runtime.getRuntime().availableProcessors();
-        for (int i = 0; i + 1 < args.length; i += 2) {
-            switch (args[i]) {
-                case "--port" -> port = Integer.parseInt(args[i + 1]);
-                case "--entries" -> entries = Path.of(args[i + 1]);
-                case "--history" -> history = Path.of(args[i + 1]);
-                case "--threads" -> threads = Integer.parseInt(args[i + 1]);
-                default -> throw new IllegalArgumentException("unknown option " + args[i]);
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("--no-cache")) {
+                cache = null;
+                continue;
+            }
+            if (i + 1 >= args.length) {
+                throw new IllegalArgumentException("missing value for " + args[i]);
+            }
+            String value = args[++i];
+            switch (args[i - 1]) {
+                case "--port" -> port = Integer.parseInt(value);
+                case "--entries" -> entries = Path.of(value);
+                case "--history" -> history = Path.of(value);
+                case "--cache" -> cache = Path.of(value);
+                case "--threads" -> threads = Integer.parseInt(value);
+                default -> throw new IllegalArgumentException("unknown option " + args[i - 1]);
             }
         }
         if (!Files.exists(entries)) {
@@ -112,7 +126,7 @@ public final class WebServer {
         }
         Files.createDirectories(history);
         ForgeEnv.init();
-        WebServer app = new WebServer(entries, history, threads);
+        WebServer app = new WebServer(entries, history, cache == null ? null : new ResultCache(cache), threads);
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", app::handle);
         server.setExecutor(Executors.newFixedThreadPool(8));
@@ -399,7 +413,7 @@ public final class WebServer {
         Thread runner = new Thread(() -> {
             try {
                 long start = System.nanoTime();
-                Tournament.Results r = Tournament.run(field, chosenOptions, threads, progress::add, running, thisStop);
+                Tournament.Results r = Tournament.run(field, chosenOptions, threads, progress::add, running, thisStop, cache);
                 Map<String, Object> json = ResultsJson.toJson(r);
                 boolean stopped = !r.notPlayed().isEmpty();
                 // A tournament stopped before any game finished has nothing worth keeping.
