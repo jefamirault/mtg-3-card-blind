@@ -23,6 +23,9 @@ it safely.
   then rebuild this project so `*/target/lib` picks up the new jar.
 - Forge statics are shared across solver threads. Anything static that a game touches has to be
   per-thread (see patches 0002 to 0004) or it breaks parallel tournaments and determinism.
+  Per-thread state is invisible to work Forge hands to its own threads, so a game must stay on one
+  thread (patch 0005). `DeterminismTest.parallelSolvesAgree` is the test that catches leaks: it
+  reproduced issue #6 once the id-counter race was widened with a `Thread.yield()`.
 
 ## Invariants the solver depends on
 

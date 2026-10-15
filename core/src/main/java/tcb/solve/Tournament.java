@@ -10,10 +10,13 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import tcb.deck.DeckList;
 import tcb.deck.VintageValidator;
+import tcb.engine.NondeterministicReplayException;
 import tcb.solve.Solver.GameResult;
 import tcb.solve.Solver.Options;
 
@@ -153,20 +156,27 @@ public final class Tournament {
                             }
                             GameResult r = cache == null ? null : cache.get(entries.get(a), entries.get(b), s, options);
                             boolean cached = r != null;
-                            Running live = null;
+                            Running[] live = new Running[1];
                             if (!cached) {
                                 try {
-                                    Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
-                                    live = new Running(a, b, s, solver);
-                                    running.add(live);
-                                    stop.register(solver);
-                                    try {
-                                        r = solver.solve();
-                                    } finally {
-                                        stop.unregister(solver);
-                                    }
-                                    if (solver.cancelled() && !r.complete()) {
-                                        running.remove(live);
+                                    Solver[] last = new Solver[1];
+                                    r = retryingAlone(() -> {
+                                        if (live[0] != null) {
+                                            running.remove(live[0]);
+                                        }
+                                        Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
+                                        last[0] = solver;
+                                        live[0] = new Running(a, b, s, solver);
+                                        running.add(live[0]);
+                                        stop.register(solver);
+                                        try {
+                                            return solver.solve();
+                                        } finally {
+                                            stop.unregister(solver);
+                                        }
+                                    });
+                                    if (last[0].cancelled() && !r.complete()) {
+                                        running.remove(live[0]);
                                         return null;
                                     }
                                     if (cache != null) {
@@ -185,8 +195,8 @@ public final class Tournament {
                                     r.describe().replace("A ", entries.get(a).name() + " ").replace("B ", entries.get(b).name() + " "),
                                     r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")",
                                     cached ? " (cached)" : ""));
-                            if (live != null) {
-                                running.remove(live);
+                            if (live[0] != null) {
+                                running.remove(live[0]);
                             }
                             return game;
                         }));
@@ -216,6 +226,34 @@ public final class Tournament {
             throw new IllegalStateException("solver failed: " + e.getCause(), e.getCause());
         } finally {
             pool.shutdownNow();
+        }
+    }
+
+    /** Held shared while a game is solved, and exclusively by a retry; see {@link #retryingAlone}. */
+    static final ReentrantReadWriteLock SOLVING = new ReentrantReadWriteLock();
+
+    /**
+     * Runs {@code solve}. Games are normally solved in parallel; if one fails because its replays
+     * weren't deterministic (most likely Forge state shared with another game, see issue #6), it
+     * is solved again with no other game running. Games already being solved finish first, and
+     * no new ones start until the retry is done.
+     */
+    static <T> T retryingAlone(Supplier<T> solve) {
+        SOLVING.readLock().lock();
+        try {
+            return solve.get();
+        } catch (RuntimeException e) {
+            if (!NondeterministicReplayException.causedBy(e)) {
+                throw e;
+            }
+        } finally {
+            SOLVING.readLock().unlock();
+        }
+        SOLVING.writeLock().lock();
+        try {
+            return solve.get();
+        } finally {
+            SOLVING.writeLock().unlock();
         }
     }
 

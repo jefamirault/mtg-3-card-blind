@@ -175,7 +175,7 @@ public final class DecisionTape {
             int expected = step.checksum();
             if (choice >= labels.size() || (expected != 0 && expected != checksum(labels))
                     || (step.ordinal() >= 0 && step.ordinal() != ordinal)) {
-                throw new IllegalStateException("Non-deterministic replay at decision " + pos + " (" + kind
+                throw new NondeterministicReplayException("Non-deterministic replay at decision " + pos + " (" + kind
                         + "): options are now " + labels);
             }
             pos++;

@@ -2,9 +2,12 @@ package tcb;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,6 +19,9 @@ import tcb.deck.DeckList;
 import tcb.engine.DecisionTape;
 import tcb.engine.GameRunner;
 import tcb.engine.GameRunner.Outcome;
+import tcb.solve.Solver;
+import tcb.solve.Solver.GameResult;
+import tcb.solve.Solver.Options;
 
 /** Replaying the same decisions must always reproduce the same game: the solver depends on it. */
 class DeterminismTest {
@@ -42,6 +48,41 @@ class DeterminismTest {
             }
             for (Future<?> job : jobs) {
                 job.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void parallelSolvesAgree() throws Exception {
+        // Full searches, several copies of each game at once on more threads than cores: Forge
+        // statics shared between games show up as a non-deterministic replay or a different
+        // result or node count (issue #6: shared id counters handed out duplicate ids).
+        Options opts = new Options(30, 30, 200_000, Duration.ofMinutes(5), false);
+        int copies = 3;
+        ExecutorService pool = Executors.newFixedThreadPool(Math.max(16, 2 * Runtime.getRuntime().availableProcessors()),
+                r -> new Thread(null, r, "solver", 64L * 1024 * 1024));
+        try {
+            Map<String, List<Future<GameResult>>> games = new LinkedHashMap<>();
+            for (int copy = 0; copy < copies; copy++) {
+                for (int a = 0; a < DECKS.length; a++) {
+                    for (int b = 0; b < DECKS.length; b++) {
+                        if (a == b) continue;
+                        final int ia = a, ib = b, start = (a + b) % 2;
+                        games.computeIfAbsent(DECKS[a].name() + " vs " + DECKS[b].name(), k -> new ArrayList<>())
+                                .add(pool.submit(() -> new Solver(DECKS[ia], DECKS[ib], start, opts).solve()));
+                    }
+                }
+            }
+            for (Map.Entry<String, List<Future<GameResult>>> game : games.entrySet()) {
+                GameResult first = game.getValue().get(0).get();
+                for (Future<GameResult> f : game.getValue()) {
+                    GameResult r = f.get();
+                    assertEquals(first.value(), r.value(), game.getKey());
+                    assertEquals(first.nodes(), r.nodes(), game.getKey());
+                    assertEquals(first.principalVariation(), r.principalVariation(), game.getKey());
+                }
             }
         } finally {
             pool.shutdownNow();

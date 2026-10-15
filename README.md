@@ -86,9 +86,11 @@ Search options shared by `solve` and `tournament`:
 | `--exhaustive` | off | Branch on every option: don't merge options that only swap identical cards, or skip repeated priority windows (slower; for checking results) |
 | `--threads` | CPUs | Games solved in parallel (`tournament` only) |
 
-Results that hit the budget are marked "unproven beyond turn N". While a tournament runs, the web
-UI shows each game being solved with its node count, elapsed time and how much of its budget it
-has used.
+Results that hit the budget are marked "unproven beyond turn N". A game whose replays stop being
+deterministic (a bug: usually Forge state shared between parallel games) is solved again with no
+other game running; if that fails too, it's scored as an unproven draw. While a tournament runs,
+the web UI shows each game being solved with its node count, elapsed time and how much of its
+budget it has used.
 
 ## How it works
 
@@ -142,6 +144,9 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
      them before every replay also keeps replays identical.
   4. a per-thread `AiCache`. The stock cache is global and only cleared inside the AI's own
      priority decision, which the solver replaces, so it kept every game ever played in memory.
+  5. the AI's forced-attacker check runs in order on the game thread instead of on a thread pool
+     with a timeout, so the attack the AI falls back to (more than 64 possible assignments) is the
+     same on every replay.
 
   The launchers run Java with `-XX:+DisableExplicitGC`: Forge calls `System.gc()` after every
   finished game, which stalls every solver thread.
