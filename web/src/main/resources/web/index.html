@@ -120,6 +120,10 @@
   .card-name { display: block; border-bottom: 1px solid var(--rule); padding-bottom: .2rem; }
   button.card { display: flex; flex-direction: column; justify-content: flex-start; text-align: left; color: var(--ink); cursor: zoom-in; transition: translate .12s ease; }
   button.card:hover, button.card:focus-visible { translate: 0 -.3rem; border-color: var(--action); z-index: 1; }
+  /* the small Scryfall scan covers the name once it loads; the name stays as the fallback */
+  button.card { position: relative; }
+  .card-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s ease; }
+  .card-art.loaded { opacity: 1; }
   .entry.illegal .card { border-style: dashed; }
   .entry input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--action); cursor: pointer; }
   .entry.left-out .hand, .entry.left-out .entry-name { opacity: .45; }
@@ -240,7 +244,7 @@
   .leg-banned { background: var(--loss); color: #fff; }
   .leg-not_legal { background: #DDE1E8; color: var(--ink-soft); }
 
-  @media (prefers-reduced-motion: reduce) { .meter > div, button.card { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .meter > div, button.card, .card-art { transition: none; } }
 </style>
 </head>
 <body>
@@ -388,6 +392,13 @@ function hand(cards) {
   return el("div", { class: "hand", "aria-label": cards.join(", ") }, ...cards.map((c) => {
     const card = el("button", { class: "card", type: "button", title: "Show " + c }, el("span", { class: "card-name" }, c));
     card.addEventListener("click", () => openCard(c));
+    fetchCard(c).then((data) => {
+      const src = (data.image_uris || data.card_faces?.[0]?.image_uris)?.small;
+      if (!src) return;
+      const art = el("img", { class: "card-art", src, alt: "" });
+      art.addEventListener("load", () => art.classList.add("loaded"));
+      card.append(art);
+    }).catch(() => {}); // the name stays
     return card;
   }));
 }
@@ -419,6 +430,28 @@ function fetchCard(name) {
   p.catch(() => cardCache.delete(name)); // let the next open retry
   cardCache.set(name, p);
   return p;
+}
+
+// Fetches many cards with one request per 75 (Scryfall's /cards/collection) and caches each by
+// the name asked for, so a list of hands doesn't send a request per card. Names it doesn't find
+// are left uncached, for fetchCard to try on its own.
+function prefetchCards(names) {
+  const wanted = [...new Set(names)].filter((n) => !cardCache.has(n));
+  for (let i = 0; i < wanted.length; i += 75) {
+    const chunk = wanted.slice(i, i + 75);
+    const batch = fetch("https://api.scryfall.com/cards/collection", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifiers: chunk.map((name) => ({ name })) }),
+    }).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+    for (const name of chunk) {
+      const key = name.toLowerCase();
+      // "Fire // Ice" and a double-faced card's front face both find the whole card
+      const p = batch.then(({ data }) => data.find((c) => c.name.toLowerCase() === key
+        || c.name.toLowerCase().split(" // ").includes(key)) || Promise.reject(new Error("not found")));
+      p.catch(() => cardCache.delete(name));
+      cardCache.set(name, p);
+    }
+  }
 }
 
 // {W/U} -> WU.svg, {T} -> T.svg: Scryfall's card-symbol file names
@@ -529,6 +562,7 @@ async function loadEntries() {
     updatePick();
     return;
   }
+  prefetchCards(data.flatMap((e) => e.cards));
   list.replaceChildren(...data.map((e) => {
     const illegal = e.problems.length > 0;
     const remove = el("button", { class: "remove", type: "button", "aria-label": "Remove " + e.name }, "Remove");
