@@ -55,7 +55,9 @@ tournament on just some of them. Each finished tournament is saved as a JSON fil
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
 delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
 limit and exact turns; they default to the CLI's defaults. *Stop* ends a running tournament early:
-finished games are kept and saved, and the rest are listed as not played.
+finished games are kept and saved, and the rest are listed as not played. Click a card in an
+entry's hand or in the standings to see its Scryfall scan, rules text and format legality (fetched
+from the Scryfall API in the browser; click a double-faced card's scan to turn it over).
 
 ### CLI
 

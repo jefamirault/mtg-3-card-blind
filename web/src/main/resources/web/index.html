@@ -118,6 +118,8 @@
   .card:nth-child(1) { transform: rotate(-7deg); }
   .card:nth-child(3) { transform: rotate(7deg); }
   .card-name { display: block; border-bottom: 1px solid var(--rule); padding-bottom: .2rem; }
+  button.card { display: flex; flex-direction: column; justify-content: flex-start; text-align: left; color: var(--ink); cursor: zoom-in; transition: translate .12s ease; }
+  button.card:hover, button.card:focus-visible { translate: 0 -.3rem; border-color: var(--action); z-index: 1; }
   .entry.illegal .card { border-style: dashed; }
   .entry input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--action); cursor: pointer; }
   .entry.left-out .hand, .entry.left-out .entry-name { opacity: .45; }
@@ -184,7 +186,61 @@
   .history .summary { font-size: .88rem; color: var(--ink-soft); }
   .shown-head { font-size: .9rem; color: var(--ink-soft); margin: 0 0 .9rem; }
 
-  @media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }
+  .cardlink { border: 0; background: none; padding: 0; color: inherit; cursor: zoom-in; text-decoration: underline dotted var(--rule); text-underline-offset: .2em; }
+  .cardlink:hover, .cardlink:focus-visible { color: var(--action); text-decoration-color: currentColor; }
+
+  /* --- card details: Scryfall scan plus a detail panel --- */
+  #lightbox {
+    position: fixed; inset: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem; cursor: zoom-out; background: rgba(23, 32, 43, .88);
+  }
+  #lightbox[hidden] { display: none; }
+  .lbwrap { display: flex; gap: 1.2rem; align-items: flex-start; justify-content: center; max-height: 100%; max-width: 100%; }
+  .lbscan {
+    /* sized up front (card ratio 5:7) so the panel doesn't jump while the scan loads */
+    flex: 0 0 auto; height: min(88vh, 40rem); width: calc(min(88vh, 40rem) * 5 / 7); max-width: min(88vw, 29rem);
+    object-fit: contain; border-radius: 4.7% / 3.4%; background: rgba(255, 255, 255, .06);
+    box-shadow: 0 10px 50px rgba(0, 0, 0, .6); cursor: default;
+  }
+  .lbscan.flips { cursor: pointer; }
+  .lbpanel {
+    flex: 0 1 23rem; min-width: 15rem; max-width: 23rem; height: min(88vh, 40rem); overflow-y: auto;
+    cursor: default; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; font-size: .92rem;
+  }
+  @media (max-width: 860px) {
+    #lightbox { padding: 1rem; }
+    .lbwrap { flex-direction: column; align-items: center; justify-content: flex-start; overflow-y: auto; }
+    .lbscan { height: auto; width: auto; max-width: 100%; max-height: 55vh; aspect-ratio: 5 / 7; }
+    .lbpanel { width: 100%; max-width: 100%; height: auto; flex: 0 0 auto; }
+  }
+  .lbrow { padding: .6rem .85rem; border-bottom: 1px solid var(--rule); }
+  .lbrow:last-child { border-bottom: 0; }
+  .lbtitle { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+  .lbface { border-top: 2px solid var(--rule); }
+  .lbname { font-size: 1.1rem; font-weight: 600; }
+  .lbname.sm { font-size: 1rem; }
+  .lbcost { display: inline-flex; align-items: center; gap: .08rem; white-space: nowrap; flex: 0 0 auto; }
+  .lbtype { color: var(--ink-soft); }
+  .lbtext p { margin: 0 0 .5rem; }
+  .lbtext p:last-child { margin-bottom: 0; }
+  .lbtext em, .lbtext .flavor { font-style: italic; color: var(--ink-soft); }
+  .lbtext .flavor { border-top: 1px solid var(--rule); margin-top: .55rem; padding-top: .5rem; }
+  .lbpt { font-size: 1.1rem; font-weight: 600; }
+  .lbartist, .lbloading { color: var(--ink-soft); font-size: .85rem; }
+  .lbloading { font-style: italic; }
+  .lblink a { color: var(--action); }
+  .ms { height: 1em; width: 1em; vertical-align: -.125em; }
+  .leggrid { display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .55rem; }
+  .legcell { display: flex; align-items: center; gap: .4rem; overflow: hidden; }
+  .legbadge { flex: 0 0 auto; font-size: .62rem; font-weight: 700; letter-spacing: .03em; padding: .05rem .3rem; border-radius: 3px; min-width: 4.6rem; text-align: center; }
+  .legname { font-size: .82rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .leg-legal { background: var(--win); color: #fff; }
+  .leg-restricted { background: #8A6D1F; color: #fff; }
+  .leg-banned { background: var(--loss); color: #fff; }
+  .leg-not_legal { background: #DDE1E8; color: var(--ink-soft); }
+
+  @media (prefers-reduced-motion: reduce) { .meter > div, button.card { transition: none; } }
 </style>
 </head>
 <body>
@@ -245,6 +301,13 @@
     <div id="results"></div>
   </section>
 </main>
+
+<div id="lightbox" hidden role="dialog" aria-modal="true" tabindex="-1">
+  <div class="lbwrap">
+    <img class="lbscan" alt="">
+    <div class="lbpanel"></div>
+  </div>
+</div>
 
 <script>
 const $ = (sel) => document.querySelector(sel);
@@ -322,9 +385,140 @@ $("#pick-all").addEventListener("click", () => pickAll(true));
 $("#pick-none").addEventListener("click", () => pickAll(false));
 
 function hand(cards) {
-  return el("div", { class: "hand", "aria-label": cards.join(", ") },
-    ...cards.map((c) => el("div", { class: "card" }, el("span", { class: "card-name" }, c))));
+  return el("div", { class: "hand", "aria-label": cards.join(", ") }, ...cards.map((c) => {
+    const card = el("button", { class: "card", type: "button", title: "Show " + c }, el("span", { class: "card-name" }, c));
+    card.addEventListener("click", () => openCard(c));
+    return card;
+  }));
 }
+
+// A card name that opens its details, for lists of cards in running text.
+function cardLink(name) {
+  const link = el("button", { class: "cardlink", type: "button", title: "Show " + name }, name);
+  link.addEventListener("click", () => openCard(name));
+  return link;
+}
+const cardLinks = (names) => names.flatMap((n, i) => i ? [", ", cardLink(n)] : [cardLink(n)]);
+
+// ---- card details: the scan and a Scryfall-style panel, fetched from the Scryfall API when a
+// card is opened and cached for the session.
+const lightbox = $("#lightbox");
+const scan = lightbox.querySelector(".lbscan");
+const panel = lightbox.querySelector(".lbpanel");
+const cardCache = new Map(); // name -> promise of the Scryfall card object
+let lbCard = null;           // name of the card being shown, so a late fetch can't fill in another
+let lbReturn = null;
+
+const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const scryfallSearch = (name) => "https://scryfall.com/search?q=" + encodeURIComponent(`!"${name}"`);
+
+function fetchCard(name) {
+  if (cardCache.has(name)) return cardCache.get(name);
+  const p = fetch("https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(name))
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  p.catch(() => cardCache.delete(name)); // let the next open retry
+  cardCache.set(name, p);
+  return p;
+}
+
+// {W/U} -> WU.svg, {T} -> T.svg: Scryfall's card-symbol file names
+const symbols = (text) => text.replace(/\{([^}]+)\}/g, (m, code) =>
+  `<img class="ms" src="https://svgs.scryfall.io/card-symbols/${encodeURIComponent(code.replace(/\//g, ""))}.svg" alt="${m}">`);
+// one paragraph per line, inline symbols, reminder text in italics
+const oracle = (text) => text.split("\n").filter((l) => l.trim())
+  .map((l) => `<p>${symbols(esc(l)).replace(/\(([^)]*)\)/g, "<em>($1)</em>")}</p>`).join("");
+const pt = (f) => f.power != null ? `${esc(f.power)}/${esc(f.toughness)}`
+  : f.loyalty != null ? `Loyalty ${esc(f.loyalty)}` : f.defense != null ? `Defense ${esc(f.defense)}` : "";
+
+// Scryfall's format order
+const FORMATS = [["standard", "Standard"], ["alchemy", "Alchemy"], ["pioneer", "Pioneer"], ["historic", "Historic"],
+  ["modern", "Modern"], ["brawl", "Brawl"], ["legacy", "Legacy"], ["timeless", "Timeless"], ["vintage", "Vintage"],
+  ["commander", "Commander"], ["pauper", "Pauper"], ["oathbreaker", "Oathbreaker"], ["penny", "Penny"], ["premodern", "Premodern"]];
+const legalities = (l) => `<div class="leggrid">${FORMATS.map(([key, label]) => {
+  const st = l[key] || "not_legal";
+  return `<div class="legcell"><span class="legbadge leg-${esc(st)}">${esc(st.replace(/_/g, " ").toUpperCase())}</span>`
+    + `<span class="legname">${label}</span></div>`;
+}).join("")}</div>`;
+
+const linkRow = (href) => `<div class="lbrow lblink"><a href="${esc(href)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></div>`;
+
+function panelBasic(name, note) {
+  return `<div class="lbrow lbtitle"><span class="lbname">${esc(name)}</span></div>`
+    + `<div class="lbrow lbloading">${esc(note)}</div>` + linkRow(scryfallSearch(name));
+}
+
+// Split, flip, adventure and double-faced cards carry their rules text per face.
+function panelFull(c) {
+  const faces = c.card_faces?.some((f) => f.oracle_text != null) ? c.card_faces : null;
+  const rows = [`<div class="lbrow lbtitle"><span class="lbname">${esc(c.name)}</span>`
+    + (!faces && c.mana_cost ? `<span class="lbcost">${symbols(esc(c.mana_cost))}</span>` : "") + `</div>`];
+  for (const f of faces || [c]) {
+    if (faces) rows.push(`<div class="lbrow lbtitle lbface"><span class="lbname sm">${esc(f.name)}</span>`
+      + (f.mana_cost ? `<span class="lbcost">${symbols(esc(f.mana_cost))}</span>` : "") + `</div>`);
+    if (f.type_line) rows.push(`<div class="lbrow lbtype">${esc(f.type_line)}</div>`);
+    const text = (f.oracle_text ? oracle(f.oracle_text) : "")
+      + (f.flavor_text ? `<p class="flavor">${esc(f.flavor_text).replace(/\n/g, "<br>")}</p>` : "");
+    if (text) rows.push(`<div class="lbrow lbtext">${text}</div>`);
+    if (pt(f)) rows.push(`<div class="lbrow lbpt">${pt(f)}</div>`);
+  }
+  const artist = c.artist || faces?.[0].artist;
+  if (artist) rows.push(`<div class="lbrow lbartist">Illustrated by ${esc(artist)}</div>`);
+  if (c.legalities) rows.push(`<div class="lbrow">${legalities(c.legalities)}</div>`);
+  rows.push(linkRow(c.scryfall_uri || scryfallSearch(c.name)));
+  return rows.join("");
+}
+
+// Hidden until the new scan loads, so the previous card never flashes up.
+function showScan(src, alt) {
+  scan.style.visibility = "hidden";
+  scan.onload = () => { scan.style.visibility = "visible"; };
+  scan.alt = alt;
+  if (src) scan.src = src; else scan.removeAttribute("src");
+  if (src && scan.complete) scan.style.visibility = "visible";
+}
+
+function openCard(name) {
+  lbCard = name;
+  lightbox.setAttribute("aria-label", name);
+  showScan(null, name);
+  scan.classList.remove("flips");
+  scan.onclick = null;
+  panel.innerHTML = panelBasic(name, "Loading from Scryfall…");
+  panel.scrollTop = 0;
+  fetchCard(name).then((c) => {
+    if (lbCard !== name || lightbox.hidden) return; // closed, or another card opened
+    // A double-faced card has a scan per face: click the scan to turn it over.
+    const scans = c.image_uris ? [c.image_uris.large]
+      : (c.card_faces || []).map((f) => f.image_uris?.large).filter(Boolean);
+    let face = 0;
+    showScan(scans[0], c.name);
+    if (scans.length > 1) {
+      scan.classList.add("flips");
+      scan.title = "Turn over";
+      scan.onclick = () => { face = (face + 1) % scans.length; showScan(scans[face], c.name); };
+    } else scan.removeAttribute("title");
+    panel.innerHTML = panelFull(c);
+    panel.scrollTop = 0;
+  }).catch(() => {
+    if (lbCard !== name || lightbox.hidden) return;
+    panel.innerHTML = panelBasic(name, "Couldn't load this card from Scryfall.");
+  });
+  if (lightbox.hidden) lbReturn = document.activeElement;
+  lightbox.hidden = false;
+  lightbox.focus();
+}
+
+function closeCard() {
+  if (lightbox.hidden) return;
+  lightbox.hidden = true;
+  lbCard = null;
+  lbReturn?.focus();
+  lbReturn = null;
+}
+
+// A click outside the scan and the panel closes it.
+lightbox.addEventListener("click", (e) => { if (!e.target.closest(".lbpanel, .lbscan")) closeCard(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); });
 
 async function loadEntries() {
   const { data } = await api("GET", "/api/entries");
@@ -561,7 +755,7 @@ function renderResults(r) {
   const standings = el("ol", { class: "standings" }, ...r.standings.map((s, i) =>
     el("li", {},
       el("span", { class: "rank" }, String(i + 1)),
-      el("span", {}, el("span", { class: "standing-name" }, s.name), el("span", { class: "standing-cards" }, s.cards.join(", "))),
+      el("span", {}, el("span", { class: "standing-name" }, s.name), el("span", { class: "standing-cards" }, ...cardLinks(s.cards))),
       el("span", { class: "pts" }, fmt(s.points) + " pts",
         el("span", { class: "record" }, `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)))));
 
