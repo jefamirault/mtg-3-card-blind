@@ -53,7 +53,9 @@ field: `./tcb tournament entries`. The first time it runs (no `--entries` folder
 the folder with the sample decks in `examples/entries`. Tick the entries to include to run a
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
-delete each one.
+delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
+limit and exact turns; they default to the CLI's defaults. *Stop* ends a running tournament early:
+finished games are kept and saved, and the rest are listed as not played.
 
 ### CLI
 

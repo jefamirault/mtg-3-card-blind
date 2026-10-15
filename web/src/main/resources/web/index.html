@@ -46,6 +46,34 @@
     padding: .6rem 1.1rem; font-weight: 600; cursor: pointer;
   }
   .primary:disabled { background: var(--draw); cursor: not-allowed; }
+  .secondary {
+    background: none; color: var(--loss); border: 1px solid var(--loss); border-radius: 3px;
+    padding: calc(.6rem - 1px) 1.1rem; font-weight: 600; cursor: pointer;
+  }
+  .secondary:disabled { color: var(--draw); border-color: var(--draw); cursor: not-allowed; }
+
+  /* --- run controls and search settings --- */
+  .controls { display: grid; justify-items: end; gap: .5rem; }
+  .buttons { display: flex; gap: .5rem; }
+  .settings { border: 0; font-size: .9rem; position: relative; }
+  .settings summary { padding: 0; color: var(--ink-soft); justify-content: flex-end; }
+  .settings-grid {
+    display: grid; grid-template-columns: auto 8rem; gap: .4rem .7rem; align-items: center;
+    position: absolute; right: 0; top: 100%; z-index: 5; width: max-content;
+    margin-top: .4rem; padding: .7rem .8rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px;
+    box-shadow: 0 6px 18px rgba(23, 32, 43, .14);
+  }
+  .settings-grid label { color: var(--ink); font-size: .88rem; }
+  .settings-grid input[type=number] {
+    width: 100%; padding: .3rem .45rem; background: #fff; border: 1px solid var(--rule); border-radius: 3px;
+  }
+  .settings-grid input[type=checkbox] { justify-self: start; width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--action); }
+  .settings-grid .hint { grid-column: 1 / -1; font-size: .8rem; color: var(--ink-soft); margin: 0; max-width: 34ch; }
+  .settings-grid .reset { grid-column: 1 / -1; justify-self: start; border: 0; background: none; color: var(--action); cursor: pointer; padding: 0; text-decoration: underline; font-size: .85rem; }
+  @media (max-width: 860px) {
+    .controls { justify-items: start; } .settings summary { justify-content: flex-start; }
+    .settings-grid { right: auto; left: 0; }
+  }
 
   main {
     display: grid; grid-template-columns: minmax(18rem, 25rem) 1fr; gap: clamp(1.5rem, 4vw, 3.5rem);
@@ -130,6 +158,7 @@
   .matrix th[scope=row] { text-align: right; color: var(--ink); white-space: nowrap; }
   .matrix td { min-width: 2.6rem; color: #fff; font-weight: 600; border: 2px solid var(--paper); }
   .matrix td.self { background: none; color: var(--rule); }
+  .matrix td.unplayed { background: none; color: var(--ink-soft); border: 2px dashed var(--rule); font-weight: 400; }
   .caption { font-size: .85rem; color: var(--ink-soft); margin: .5rem 0 0; max-width: 60ch; }
 
   details { border-bottom: 1px solid var(--rule); }
@@ -163,7 +192,27 @@
     <h1>3 Card Blind</h1>
     <p>Each player picks three Vintage-legal cards. Every matchup is solved with perfect play on both sides, so the best deck wins.</p>
   </div>
-  <button class="primary" id="run" type="button">Run tournament</button>
+  <div class="controls">
+    <div class="buttons">
+      <button class="secondary" id="stop" type="button" hidden>Stop</button>
+      <button class="primary" id="run" type="button">Run tournament</button>
+    </div>
+    <details class="settings" id="settings">
+      <summary>Search settings</summary>
+      <div class="settings-grid">
+        <label for="opt-time">Time per game (seconds)</label>
+        <input type="number" id="opt-time" min="1" max="86400" step="1">
+        <label for="opt-nodes">Node budget per game</label>
+        <input type="number" id="opt-nodes" min="1000" max="1000000000" step="1000">
+        <label for="opt-turns">Turn limit</label>
+        <input type="number" id="opt-turns" min="1" max="200" step="1">
+        <label for="opt-exact">Exact turns</label>
+        <input type="checkbox" id="opt-exact">
+        <p class="hint">Games still going at the turn limit are draws. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
+        <button type="button" class="reset" id="opt-reset">Reset to defaults</button>
+      </div>
+    </details>
+  </div>
 </header>
 
 <main>
@@ -255,9 +304,12 @@ function updatePick() {
     box.checked = !leftOut.has(box.value);
     box.closest(".entry").classList.toggle("left-out", !box.checked);
   }
-  const running = tournamentState === "running";
-  $("#run").disabled = running || n < 2;
-  $("#run").textContent = running ? "Solving…" : `Run tournament (${n * (n - 1)} games)`;
+  const busy = tournamentState === "running" || tournamentState === "stopping";
+  $("#run").disabled = busy || n < 2;
+  $("#run").textContent = busy ? "Solving…" : `Run tournament (${n * (n - 1)} games)`;
+  $("#stop").hidden = !busy;
+  $("#stop").disabled = tournamentState === "stopping";
+  $("#stop").textContent = tournamentState === "stopping" ? "Stopping…" : "Stop";
 }
 
 function pickAll(include) {
@@ -316,23 +368,69 @@ $("#add").addEventListener("submit", async (ev) => {
   loadEntries();
 });
 
+// ---- search settings, remembered in this browser; blank fields use the server's defaults
+const optionInputs = { timeSeconds: "#opt-time", nodes: "#opt-nodes", maxTurns: "#opt-turns" };
+let defaults = null;
+function loadSettings(d) {
+  if (defaults) return;
+  defaults = d;
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem("tcb.options")) || {}; } catch { /* use defaults */ }
+  const o = { ...d, ...stored };
+  for (const [k, sel] of Object.entries(optionInputs)) $(sel).value = o[k];
+  $("#opt-exact").checked = !!o.exactTurns;
+}
+function settings() {
+  const o = { exactTurns: $("#opt-exact").checked };
+  for (const [k, sel] of Object.entries(optionInputs)) {
+    const v = $(sel).value.trim();
+    o[k] = v === "" ? defaults?.[k] : Number(v);
+  }
+  return o;
+}
+function saveSettings() {
+  try { localStorage.setItem("tcb.options", JSON.stringify(settings())); } catch { /* not remembered */ }
+}
+for (const sel of [...Object.values(optionInputs), "#opt-exact"]) $(sel).addEventListener("change", saveSettings);
+$("#opt-reset").addEventListener("click", () => {
+  try { localStorage.removeItem("tcb.options"); } catch { /* nothing stored */ }
+  const d = defaults;
+  defaults = null;
+  if (d) loadSettings(d);
+});
+const describeOptions = (o) => `${duration(o.timeSeconds)} and ${Number(o.nodes).toLocaleString()} nodes per game, `
+  + `turn limit ${o.maxTurns}${o.exactTurns ? ", exact turns" : ""}`;
+
 // ---- tournament
 $("#run").addEventListener("click", async () => {
-  const { ok, data } = await api("POST", "/api/tournament", { entries: chosen() });
+  const { ok, data } = await api("POST", "/api/tournament", { entries: chosen(), options: settings() });
   showProblems($("#run-problems"), ok ? [] : data.problems || [data.error]);
   if (ok) { viewing = null; poll(); }
 });
 
+$("#stop").addEventListener("click", async () => {
+  if (!confirm("Stop the tournament? Finished games are kept; the rest are marked as not played.")) return;
+  const { ok, data } = await api("POST", "/api/tournament/stop");
+  if (!ok) {
+    showProblems($("#run-problems"), ["Couldn't stop the tournament: " + (data.error || "the server didn't respond.")]);
+    return;
+  }
+  showProblems($("#run-problems"), []);
+  render(data);
+});
+
+const busy = (state) => state === "running" || state === "stopping";
 let pollTimer;
 async function poll() {
   clearTimeout(pollTimer);
   const { data } = await api("GET", "/api/tournament");
-  if (tournamentState === "running" && data.state !== "running") {
+  loadSettings(data.defaults);
+  if (busy(tournamentState) && !busy(data.state)) {
     viewing = null; // show the tournament that just finished
     await loadHistory();
   }
   render(data);
-  if (data.state === "running") pollTimer = setTimeout(poll, 2000);
+  if (busy(data.state)) pollTimer = setTimeout(poll, 2000);
 }
 
 // ---- saved tournaments
@@ -351,12 +449,14 @@ async function loadHistory() {
 function renderHistory() {
   const list = $("#history");
   list.hidden = history.length === 0;
-  const shown = tournamentState === "running" && !viewing ? null : viewing || history[0]?.id;
+  const shown = busy(tournamentState) && !viewing ? null : viewing || history[0]?.id;
   list.replaceChildren(...history.map((h) => {
     const view = el("button", { class: "view", type: "button" },
       el("span", { class: "when" }, when(h.finished)),
       el("span", { class: "summary" },
-        `${h.entries.length} entries, ${h.games} games in ${duration(h.seconds)} · ${h.leader} first with ${fmt(h.leaderPoints)} pts`));
+        `${h.entries.length} entries, ${h.games} games in ${duration(h.seconds)}`
+        + (h.notPlayed ? ` (stopped, ${h.notPlayed} not played)` : "")
+        + ` · ${h.leader} first with ${fmt(h.leaderPoints)} pts`));
     view.addEventListener("click", () => { viewing = h.id; renderHistory(); showSaved(); });
     const del = el("button", { class: "remove", type: "button", "aria-label": "Delete results from " + when(h.finished) }, "Delete");
     del.addEventListener("click", async () => {
@@ -372,9 +472,9 @@ function renderHistory() {
 
 async function showSaved() {
   const out = $("#results");
-  const id = tournamentState === "running" && !viewing ? null : viewing || history[0]?.id;
+  const id = busy(tournamentState) && !viewing ? null : viewing || history[0]?.id;
   if (!id) {
-    out.replaceChildren(tournamentState === "running" ? "" : el("p", { class: "empty" },
+    out.replaceChildren(busy(tournamentState) ? "" : el("p", { class: "empty" },
       "Add at least two entries, tick the ones to play, then run the tournament. Each pair of decks plays two games, one with each on the play."));
     return;
   }
@@ -385,8 +485,12 @@ async function showSaved() {
   }
   const t = saved.get(id);
   if (id !== (viewing || history[0]?.id)) return; // another tournament was picked meanwhile
+  const unplayed = t.results.notPlayed || [];
+  const head = unplayed.length
+    ? `Tournament stopped ${when(t.finished)} after ${duration(t.seconds)}: ${t.results.games.length} of ${t.results.games.length + unplayed.length} games played.`
+    : `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`;
   out.replaceChildren(
-    el("p", { class: "shown-head" }, `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`),
+    el("p", { class: "shown-head" }, head, t.options ? el("br") : null, t.options ? `Search: ${describeOptions(t.options)}.` : null),
     ...renderResults(t.results));
 }
 
@@ -396,14 +500,20 @@ function render(status) {
   updatePick();
   renderHistory();
   showSaved();
-  if (status.state === "running") {
+  if (busy(status.state)) {
     const done = status.progress.length;
     out.replaceChildren(
-      el("p", {}, `Solved ${done} of ${status.totalGames} games.`),
+      el("p", {}, status.state === "stopping"
+        ? `Stopping: solved ${done} of ${status.totalGames} games, cancelling the rest.`
+        : `Solved ${done} of ${status.totalGames} games. Search: ${describeOptions(status.options)}.`),
       el("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(status.totalGames), "aria-valuenow": String(done) },
         Object.assign(el("div"), { style: `width:${status.totalGames ? 100 * done / status.totalGames : 0}%` })),
       runningGames(status.running || []),
       el("ul", { class: "log" }, ...[...status.progress].reverse().map((p) => el("li", {}, p))));
+    return;
+  }
+  if (status.state === "stopped" && status.results && !status.results.games.length) {
+    out.replaceChildren(el("p", { class: "empty" }, "The tournament was stopped before any game finished, so nothing was saved."));
     return;
   }
   if (status.state === "failed") {
@@ -457,8 +567,10 @@ function renderResults(r) {
   const head = el("tr", {}, el("th"), ...names.map((n, j) => el("th", { scope: "col", title: n }, String(j + 1))));
   const rows = names.map((n, i) => el("tr", {},
     el("th", { scope: "row" }, `${i + 1}. ${n}`),
-    ...r.matrix[i].map((p) => p == null
+    ...r.matrix[i].map((p, j) => i === j
       ? el("td", { class: "self" }, "–")
+      : p == null
+      ? el("td", { class: "unplayed", title: `${n} vs ${names[j]}: not all games played` }, "·")
       : Object.assign(el("td", { title: `${n}: ${fmt(p)} of 6 points` }, fmt(p)), { style: `background:${cellColor(p)}` }))));
   const matrix = el("div", { class: "matrix-wrap" }, el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, ...rows)));
 
@@ -479,14 +591,23 @@ function renderResults(r) {
       el("ol", { class: "line" }, ...steps));
   });
 
+  const notPlayed = r.notPlayed || [];
+  const unplayedNote = notPlayed.length ? [
+    el("h3", {}, "Not played"),
+    el("p", { class: "caption" }, "The tournament was stopped before these games finished. Standings count only the games played."),
+    el("ul", { class: "log" }, ...notPlayed.map((g) => el("li", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play`))),
+  ] : [];
+
   return [
     standings,
     el("h3", {}, "Matchups"),
     matrix,
-    el("p", { class: "caption" }, "Points each row deck scored against each column deck over their two games: 6 means it won both, 2 means two draws."),
+    el("p", { class: "caption" }, "Points each row deck scored against each column deck over their two games: 6 means it won both, 2 means two draws."
+      + (notPlayed.length ? " A dot marks a pair with a game left unplayed." : "")),
     el("h3", {}, "Games"),
     el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found."),
     ...games,
+    ...unplayedNote,
   ];
 }
 

@@ -139,6 +139,7 @@ public final class Solver {
     private volatile long startNanos;
     private volatile int turnLimit;
     private volatile String pass = "starting";
+    private volatile boolean cancelled;
 
     public Solver(DeckList a, DeckList b, int startingPlayer, Options options) {
         this.runner = new GameRunner(a, b, startingPlayer, options.exhaustive());
@@ -152,6 +153,18 @@ public final class Solver {
         long n = nodes;
         double used = Math.max((double) n / options.nodeBudget(), (double) elapsed / options.timeBudget().toNanos());
         return new Progress(n, Duration.ofNanos(elapsed), turnLimit, pass, Math.min(1, used));
+    }
+
+    /**
+     * Asks a running (or not yet started) {@link #solve()} to stop at its next search node, as if
+     * its budget had run out. Safe to call from any thread.
+     */
+    public void cancel() {
+        cancelled = true;
+    }
+
+    public boolean cancelled() {
+        return cancelled;
     }
 
     public GameResult solve() {
@@ -177,8 +190,9 @@ public final class Solver {
             }
         }
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
-        if (best == null) {
-            return new GameResult(0, 1, 0, 0, false, List.of("(search budget exhausted before any result)"), nodes, elapsed);
+        if (best == null || (cancelled && !complete)) {
+            String why = cancelled ? "(search stopped)" : "(search budget exhausted before any result)";
+            return new GameResult(0, 1, 0, 0, false, List.of(why), nodes, elapsed);
         }
         pass = "replaying the optimal line";
         return new GameResult(best.pWin(), best.pDraw(), best.pLoss(), bestLimit, complete,
@@ -225,7 +239,7 @@ public final class Solver {
         try {
             long n = nodes + 1;
             nodes = n;
-            if (n > options.nodeBudget() || System.nanoTime() > deadline) {
+            if (n > options.nodeBudget() || System.nanoTime() > deadline || cancelled) {
                 throw new BudgetExceeded();
             }
             if (outcome == null) {

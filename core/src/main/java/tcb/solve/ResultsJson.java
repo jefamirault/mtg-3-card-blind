@@ -21,12 +21,13 @@ public final class ResultsJson {
             entries.add(Map.of("name", d.name(), "cards", d.cards()));
         }
         root.put("entries", entries);
-        // matrix[i][j]: points entry i scored against entry j over both games (null on the diagonal)
+        // matrix[i][j]: points entry i scored against entry j over both games (null on the diagonal,
+        // and for pairs with a game left unplayed by a stopped tournament)
         List<List<Double>> matrix = new ArrayList<>();
         for (int i = 0; i < r.entries().size(); i++) {
             List<Double> row = new ArrayList<>();
             for (int j = 0; j < r.entries().size(); j++) {
-                row.add(i == j ? null : r.pointsAgainst(i, j));
+                row.add(i == j || !r.bothPlayed(i, j) ? null : r.pointsAgainst(i, j));
             }
             matrix.add(row);
         }
@@ -60,6 +61,12 @@ public final class ResultsJson {
             games.add(m);
         }
         root.put("games", games);
+        List<Map<String, Object>> notPlayed = new ArrayList<>();
+        for (Tournament.Unplayed u : r.notPlayed()) {
+            notPlayed.add(Map.of("a", r.entries().get(u.a()).name(), "b", r.entries().get(u.b()).name(),
+                    "onThePlay", r.entries().get(u.startingPlayer() == 0 ? u.a() : u.b()).name()));
+        }
+        root.put("notPlayed", notPlayed);
         return root;
     }
 }

@@ -53,7 +53,10 @@ import tcb.solve.Tournament;
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     private static final int MAX_NAME = 40;
-    private static final Solver.Options OPTIONS = Solver.Options.defaults();
+    private static final Solver.Options DEFAULTS = Solver.Options.defaults();
+    private static final int MAX_TIME_SECONDS = 24 * 60 * 60;
+    private static final long MIN_NODES = 1_000, MAX_NODES = 1_000_000_000;
+    private static final int MAX_TURNS = 200;
     private static final DateTimeFormatter ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path entriesDir;
@@ -62,9 +65,11 @@ public final class WebServer {
     private final List<String> cardNames;
 
     // tournament state, guarded by this
-    private String state = "idle"; // idle | running | done | failed
+    private String state = "idle"; // idle | running | stopping | done | stopped | failed
     private final List<String> progress = new CopyOnWriteArrayList<>();
     private final Set<Tournament.Running> running = ConcurrentHashMap.newKeySet();
+    private Tournament.Stop stop = new Tournament.Stop();
+    private Solver.Options options = DEFAULTS;
     private List<DeckList> tournamentEntries = List.of();
     private int totalGames;
     private Map<String, Object> results;
@@ -146,6 +151,8 @@ public final class WebServer {
                 sendJson(ex, 200, status());
             } else if (path.equals("/api/tournament") && method.equals("POST")) {
                 startTournament(ex);
+            } else if (path.equals("/api/tournament/stop") && method.equals("POST")) {
+                stopTournament(ex);
             } else if (path.equals("/api/history") && method.equals("GET")) {
                 sendJson(ex, 200, listHistory());
             } else if (path.startsWith("/api/history/") && method.equals("GET")) {
@@ -258,9 +265,63 @@ public final class WebServer {
         m.put("progress", progress);
         m.put("running", runningGames());
         m.put("totalGames", totalGames);
+        m.put("options", optionsJson(options));
+        m.put("defaults", optionsJson(DEFAULTS));
         m.put("results", results);
         m.put("error", error);
         return m;
+    }
+
+    /** The search settings the page can change, in the form it sends them back. */
+    private static Map<String, Object> optionsJson(Solver.Options o) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("timeSeconds", o.timeBudget().toSeconds());
+        m.put("nodes", o.nodeBudget());
+        m.put("maxTurns", o.maxTurns());
+        m.put("exactTurns", o.exactTurns());
+        return m;
+    }
+
+    /**
+     * Reads the body's {@code options} object; missing settings keep their defaults. Out-of-range
+     * values add to {@code problems}.
+     */
+    private static Solver.Options parseOptions(JsonObject body, List<String> problems) {
+        if (body == null || !body.has("options") || !body.get("options").isJsonObject()) {
+            return DEFAULTS;
+        }
+        JsonObject o = body.getAsJsonObject("options");
+        long time = DEFAULTS.timeBudget().toSeconds();
+        long nodes = DEFAULTS.nodeBudget();
+        int maxTurns = DEFAULTS.maxTurns();
+        boolean exactTurns = DEFAULTS.exactTurns();
+        try {
+            if (o.has("timeSeconds")) {
+                time = o.get("timeSeconds").getAsLong();
+            }
+            if (o.has("nodes")) {
+                nodes = o.get("nodes").getAsLong();
+            }
+            if (o.has("maxTurns")) {
+                maxTurns = o.get("maxTurns").getAsInt();
+            }
+            if (o.has("exactTurns")) {
+                exactTurns = o.get("exactTurns").getAsBoolean();
+            }
+        } catch (RuntimeException e) {
+            problems.add("Search settings must be whole numbers.");
+            return DEFAULTS;
+        }
+        if (time < 1 || time > MAX_TIME_SECONDS) {
+            problems.add("Time per game must be between 1 second and 24 hours.");
+        }
+        if (nodes < MIN_NODES || nodes > MAX_NODES) {
+            problems.add(String.format("Node budget must be between %,d and %,d.", MIN_NODES, MAX_NODES));
+        }
+        if (maxTurns < 1 || maxTurns > MAX_TURNS) {
+            problems.add("Turn limit must be between 1 and " + MAX_TURNS + ".");
+        }
+        return new Solver.Options(maxTurns, maxTurns, nodes, Duration.ofSeconds(time), exactTurns);
     }
 
     /** Live statistics of the games being solved, longest-running first. */
@@ -276,17 +337,20 @@ public final class WebServer {
             m.put("nodes", p.nodes());
             m.put("seconds", p.elapsed().toMillis() / 1000.0);
             m.put("turnLimit", p.turnLimit());
-            m.put("maxTurns", OPTIONS.maxTurns());
+            m.put("maxTurns", options.maxTurns());
             m.put("pass", p.pass());
             m.put("budgetUsed", p.budgetUsed());
-            m.put("timeBudgetSeconds", OPTIONS.timeBudget().toSeconds());
+            m.put("timeBudgetSeconds", options.timeBudget().toSeconds());
             out.add(m);
         }
         out.sort(Comparator.comparingDouble((Map<String, Object> m) -> (double) m.get("seconds")).reversed());
         return out;
     }
 
-    /** Runs every entry, or only those named in the body's {@code entries} array. */
+    /**
+     * Runs every entry, or only those named in the body's {@code entries} array, with the search
+     * settings in its {@code options} object (see {@link #parseOptions}).
+     */
     private void startTournament(HttpExchange ex) throws IOException {
         List<DeckList> all = readEntries();
         List<DeckList> entries = all;
@@ -310,13 +374,14 @@ public final class WebServer {
         if (entries.size() < 2) {
             problems.add("Choose at least two entries to run a tournament.");
         }
+        Solver.Options chosenOptions = parseOptions(body, problems);
         if (!problems.isEmpty()) {
             sendJson(ex, 400, Map.of("problems", problems));
             return;
         }
         List<DeckList> field = entries;
         synchronized (this) {
-            if (state.equals("running")) {
+            if (state.equals("running") || state.equals("stopping")) {
                 sendJson(ex, 409, Map.of("problems", List.of("A tournament is already running.")));
                 return;
             }
@@ -324,19 +389,26 @@ public final class WebServer {
             progress.clear();
             running.clear();
             tournamentEntries = field;
+            options = chosenOptions;
+            stop = new Tournament.Stop();
             totalGames = field.size() * (field.size() - 1);
             results = null;
             error = null;
         }
+        Tournament.Stop thisStop = stop;
         Thread runner = new Thread(() -> {
             try {
                 long start = System.nanoTime();
-                Tournament.Results r = Tournament.run(field, OPTIONS, threads, progress::add, running);
+                Tournament.Results r = Tournament.run(field, chosenOptions, threads, progress::add, running, thisStop);
                 Map<String, Object> json = ResultsJson.toJson(r);
-                save(json, Duration.ofNanos(System.nanoTime() - start));
+                boolean stopped = !r.notPlayed().isEmpty();
+                // A tournament stopped before any game finished has nothing worth keeping.
+                if (!r.games().isEmpty()) {
+                    save(json, chosenOptions, Duration.ofNanos(System.nanoTime() - start));
+                }
                 synchronized (this) {
                     results = json;
-                    state = "done";
+                    state = stopped ? "stopped" : "done";
                 }
             } catch (IOException e) {
                 synchronized (this) {
@@ -355,10 +427,21 @@ public final class WebServer {
         sendJson(ex, 202, status());
     }
 
+    /** Stops the running tournament: finished games are kept, the rest are marked not played. */
+    private void stopTournament(HttpExchange ex) throws IOException {
+        synchronized (this) {
+            if (state.equals("running")) {
+                state = "stopping";
+                stop.request();
+            }
+        }
+        sendJson(ex, 200, status());
+    }
+
     // ---- saved tournaments
 
     /** Writes a finished tournament to the history directory, named by when it finished. */
-    private synchronized void save(Map<String, Object> results, Duration elapsed) throws IOException {
+    private synchronized void save(Map<String, Object> results, Solver.Options options, Duration elapsed) throws IOException {
         String base = LocalDateTime.now().format(ID_FORMAT);
         String id = base;
         for (int n = 2; Files.exists(historyFile(id)); n++) {
@@ -368,6 +451,7 @@ public final class WebServer {
         saved.put("id", id);
         saved.put("finished", LocalDateTime.now().withNano(0).toString());
         saved.put("seconds", elapsed.toMillis() / 1000.0);
+        saved.put("options", optionsJson(options));
         saved.put("results", results);
         Files.writeString(historyFile(id), GSON.toJson(saved));
     }
@@ -388,6 +472,7 @@ public final class WebServer {
                 m.put("seconds", saved.get("seconds").getAsDouble());
                 m.put("entries", entries);
                 m.put("games", results.getAsJsonArray("games").size());
+                m.put("notPlayed", results.has("notPlayed") ? results.getAsJsonArray("notPlayed").size() : 0);
                 m.put("leader", top.get("name").getAsString());
                 m.put("leaderPoints", top.get("points").getAsDouble());
                 out.add(m);

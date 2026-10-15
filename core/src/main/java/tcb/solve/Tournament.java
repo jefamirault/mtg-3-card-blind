@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -45,7 +46,20 @@ public final class Tournament {
     public record Standing(DeckList deck, double points, double wins, double draws, double losses) {
     }
 
-    public record Results(List<DeckList> entries, List<Game> games, List<Standing> standings) {
+    /** A game the tournament was stopped before it finished. */
+    public record Unplayed(int a, int b, int startingPlayer) {
+    }
+
+    /**
+     * @param games     the games played; standings count only these
+     * @param notPlayed games left unplayed because the tournament was stopped (empty otherwise)
+     */
+    public record Results(List<DeckList> entries, List<Game> games, List<Standing> standings, List<Unplayed> notPlayed) {
+        /** True if both games between {@code i} and {@code j} were played. */
+        public boolean bothPlayed(int i, int j) {
+            return notPlayed.stream().noneMatch(u -> (u.a() == i && u.b() == j) || (u.a() == j && u.b() == i));
+        }
+
         /** Points entry {@code i} scored against entry {@code j} over both games. */
         public double pointsAgainst(int i, int j) {
             double total = 0;
@@ -58,7 +72,7 @@ public final class Tournament {
         }
 
         public boolean allComplete() {
-            return games.stream().allMatch(g -> g.result().complete());
+            return notPlayed.isEmpty() && games.stream().allMatch(g -> g.result().complete());
         }
     }
 
@@ -66,20 +80,52 @@ public final class Tournament {
     public record Running(int a, int b, int startingPlayer, Solver solver) {
     }
 
+    /**
+     * Stops a tournament early: games not started yet are skipped and games being solved are
+     * cancelled. Both end up in {@link Results#notPlayed()}; finished games are kept.
+     */
+    public static final class Stop {
+        private volatile boolean requested;
+        private final Set<Solver> solvers = ConcurrentHashMap.newKeySet();
+
+        public void request() {
+            requested = true;
+            solvers.forEach(Solver::cancel);
+        }
+
+        public boolean requested() {
+            return requested;
+        }
+
+        // Registering before checking the flag (and request() setting it before cancelling) means
+        // every solver is either cancelled by request() or sees the flag here.
+        private void register(Solver solver) {
+            solvers.add(solver);
+            if (requested) {
+                solver.cancel();
+            }
+        }
+
+        private void unregister(Solver solver) {
+            solvers.remove(solver);
+        }
+    }
+
     private Tournament() {
     }
 
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress) {
-        return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet());
+        return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet(), new Stop());
     }
 
     /**
      * @param progress one line per finished game
      * @param running  games currently being solved: each is added when its search starts and
      *                 removed after its line has gone to {@code progress}. Must be thread-safe.
+     * @param stop     to stop the tournament early from another thread
      */
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress,
-                              Collection<Running> running) {
+                              Collection<Running> running, Stop stop) {
         for (DeckList deck : entries) {
             VintageValidator.requireLegal(deck);
         }
@@ -90,19 +136,32 @@ public final class Tournament {
             return t;
         });
         try {
+            // A null game is one left unplayed by a stop.
             List<Future<Game>> futures = new ArrayList<>();
             for (int i = 0; i < entries.size(); i++) {
                 for (int j = i + 1; j < entries.size(); j++) {
                     for (int start = 0; start < 2; start++) {
                         final int a = i, b = j, s = start;
                         futures.add(pool.submit(() -> {
+                            if (stop.requested()) {
+                                return null;
+                            }
                             GameResult r;
                             Running live = null;
                             try {
                                 Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
                                 live = new Running(a, b, s, solver);
                                 running.add(live);
-                                r = solver.solve();
+                                stop.register(solver);
+                                try {
+                                    r = solver.solve();
+                                } finally {
+                                    stop.unregister(solver);
+                                }
+                                if (solver.cancelled() && !r.complete()) {
+                                    running.remove(live);
+                                    return null;
+                                }
                             } catch (RuntimeException e) {
                                 // Don't lose the whole tournament to one game: score it as an unproven draw.
                                 r = new GameResult(0, 1, 0, 0, false, List.of("solver error: " + e.getMessage()),
@@ -123,10 +182,21 @@ public final class Tournament {
                 }
             }
             List<Game> games = new ArrayList<>();
-            for (Future<Game> f : futures) {
-                games.add(f.get());
+            List<Unplayed> notPlayed = new ArrayList<>();
+            int k = 0;
+            for (int i = 0; i < entries.size(); i++) {
+                for (int j = i + 1; j < entries.size(); j++) {
+                    for (int start = 0; start < 2; start++) {
+                        Game g = futures.get(k++).get();
+                        if (g != null) {
+                            games.add(g);
+                        } else {
+                            notPlayed.add(new Unplayed(i, j, start));
+                        }
+                    }
+                }
             }
-            return new Results(List.copyOf(entries), games, standings(entries, games));
+            return new Results(List.copyOf(entries), games, standings(entries, games), notPlayed);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
