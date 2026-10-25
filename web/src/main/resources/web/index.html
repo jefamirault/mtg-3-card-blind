@@ -141,6 +141,13 @@
   .running .meter { height: .35rem; }
   .running .meter > div { background: var(--ink-soft); }
   .running .meter.late > div { background: var(--loss); }
+  .running details { border: 0; margin-top: .45rem; }
+  .running summary { display: list-item; padding: 0; font-size: .85rem; color: var(--ink-soft); }
+  .search-line { margin: .35rem 0 0; padding-left: 2rem; font-size: .82rem; color: var(--ink-soft); }
+  .search-line li { padding: .05rem 0; }
+  .search-line .who { color: var(--ink); font-weight: 600; }
+  .search-line .of { font-variant-numeric: tabular-nums; }
+  .search-line .more { list-style: none; margin-left: -2rem; font-style: italic; }
   .log { list-style: none; padding: 0; margin: 1rem 0 0; max-height: 24rem; overflow: auto; font-size: .92rem; }
   .log li { padding: .2rem 0; border-bottom: 1px dotted var(--rule); }
 
@@ -772,8 +779,35 @@ function runningGames(games) {
         el("span", {}, g.pass.replace(/\b[AB]\b/g, (p) => p === "A" ? g.a : g.b))),
       el("div", { class: "meter" + (used >= 75 ? " late" : ""), role: "progressbar", "aria-label": "Search budget used",
           "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(used) },
-        Object.assign(el("div"), { style: `width:${used}%` })));
+        Object.assign(el("div"), { style: `width:${used}%` })),
+      searchLine(g));
   }));
+}
+
+// The line a running game's search is on: each decision with the option being tried, from the
+// first decision of the game. Which games have it open survives the re-render on every poll.
+const openLines = new Set();
+function searchLine(g) {
+  const line = g.line || [];
+  if (!line.length) return null;
+  const key = `${g.a}|${g.b}|${g.onThePlay}`;
+  const last = line[line.length - 1];
+  const steps = line.map((d) => el("li", {},
+    `T${d.turn} `,
+    el("span", { class: "who" }, d.player ?? "Chance"),
+    ` ${d.kind}: ${d.choice.replace(/-> ([AB])\b/g, (_, p) => "-> " + (p === "A" ? g.a : g.b))} `,
+    el("span", { class: "of", title: `option ${d.tried} tried of ${d.options}` }, `(${d.tried}/${d.options})`)));
+  if (g.depth > line.length) {
+    steps.push(el("li", { class: "more" }, `… ${g.depth - line.length} more decisions`));
+  }
+  const top = line[0];
+  const details = el("details", openLines.has(key) ? { open: "" } : {},
+    el("summary", {}, `Searching ${g.depth} decision${g.depth === 1 ? "" : "s"} deep`
+      + (g.depth > line.length ? "" : `, turn ${last.turn}`)
+      + ` · first decision: option ${top.tried} of ${top.options}`),
+    el("ol", { class: "search-line" }, ...steps));
+  details.addEventListener("toggle", () => details.open ? openLines.add(key) : openLines.delete(key));
+  return details;
 }
 
 function cellColor(points) {

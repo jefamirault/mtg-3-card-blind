@@ -355,6 +355,19 @@ public final class WebServer {
             m.put("pass", p.pass());
             m.put("budgetUsed", p.budgetUsed());
             m.put("timeBudgetSeconds", options.timeBudget().toSeconds());
+            List<Map<String, Object>> line = new ArrayList<>();
+            for (Solver.Decision d : p.line()) {
+                Map<String, Object> dm = new LinkedHashMap<>();
+                dm.put("player", d.player() < 0 ? null : entries.get(d.player() == 0 ? r.a() : r.b()).name());
+                dm.put("kind", d.kind());
+                dm.put("turn", d.turn());
+                dm.put("choice", d.choice());
+                dm.put("tried", d.tried());
+                dm.put("options", d.options());
+                line.add(dm);
+            }
+            m.put("line", line);
+            m.put("depth", p.depth());
             out.add(m);
         }
         out.sort(Comparator.comparingDouble((Map<String, Object> m) -> (double) m.get("seconds")).reversed());

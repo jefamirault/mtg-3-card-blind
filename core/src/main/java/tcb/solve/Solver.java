@@ -117,9 +117,29 @@ public final class Solver {
      * @param turnLimit  turn limit of the current pass (iterative deepening doubles it)
      * @param pass       what the current pass is trying to prove
      * @param budgetUsed fraction of the node or time budget used, whichever is larger (0 to 1)
+     * @param line       the decisions on the line being searched right now, from the first one;
+     *                   at most {@link #MAX_LINE} of them
+     * @param depth      how many decisions deep the search is (can be more than {@code line} holds)
      */
-    public record Progress(long nodes, Duration elapsed, int turnLimit, String pass, double budgetUsed) {
+    public record Progress(long nodes, Duration elapsed, int turnLimit, String pass, double budgetUsed,
+                           List<Decision> line, int depth) {
     }
+
+    /**
+     * One decision on the line being searched.
+     *
+     * @param player  0 for deck A, 1 for deck B, {@link DecisionTape#CHANCE} for a random event
+     * @param kind    decision type, e.g. "priority", "attack"
+     * @param turn    turn the decision is made in
+     * @param choice  the option being searched
+     * @param tried   how many options have been tried here, counting this one
+     * @param options how many options there are
+     */
+    public record Decision(int player, String kind, int turn, String choice, int tried, int options) {
+    }
+
+    /** Most decisions {@link #progress()} reports; the top of the tree changes slowly, the rest flickers. */
+    public static final int MAX_LINE = 30;
 
     private final GameRunner runner;
     private final Options options;
@@ -140,6 +160,22 @@ public final class Solver {
     private volatile int turnLimit;
     private volatile String pass = "starting";
     private volatile boolean cancelled;
+    /**
+     * The decisions on the current search path, for {@link #progress()}: each is the branch, the
+     * option being searched and how many have been tried. Guarded by itself; a lock per child
+     * searched is cheap next to replaying the game.
+     */
+    private final List<Frame> line = new ArrayList<>();
+
+    private static final class Frame {
+        final Branch branch;
+        int choice;
+        int tried;
+
+        Frame(Branch branch) {
+            this.branch = branch;
+        }
+    }
 
     public Solver(DeckList a, DeckList b, int startingPlayer, Options options) {
         this.runner = new GameRunner(a, b, startingPlayer, options.exhaustive());
@@ -152,7 +188,38 @@ public final class Solver {
         long elapsed = start == 0 ? 0 : System.nanoTime() - start;
         long n = nodes;
         double used = Math.max((double) n / options.nodeBudget(), (double) elapsed / options.timeBudget().toNanos());
-        return new Progress(n, Duration.ofNanos(elapsed), turnLimit, pass, Math.min(1, used));
+        List<Decision> decisions = new ArrayList<>();
+        int depth;
+        synchronized (line) {
+            depth = line.size();
+            for (Frame f : line.subList(0, Math.min(depth, MAX_LINE))) {
+                Branch b = f.branch;
+                decisions.add(new Decision(b.player(), b.kind(), b.turn(), b.labels().get(f.choice), f.tried, b.labels().size()));
+            }
+        }
+        return new Progress(n, Duration.ofNanos(elapsed), turnLimit, pass, Math.min(1, used), decisions, depth);
+    }
+
+    /** Puts a decision on the reported line; {@link #exploring} then names each option searched. */
+    private Frame enter(Branch branch) {
+        Frame f = new Frame(branch);
+        synchronized (line) {
+            line.add(f);
+        }
+        return f;
+    }
+
+    private void exploring(Frame f, int choice) {
+        synchronized (line) {
+            f.choice = choice;
+            f.tried++;
+        }
+    }
+
+    private void leave() {
+        synchronized (line) {
+            line.remove(line.size() - 1);
+        }
     }
 
     /**
@@ -289,15 +356,21 @@ public final class Solver {
         int n = branch.labels().size();
         double value = 0, pWin = 0, pDraw = 0, pLoss = 0;
         int[] pv = null;
-        for (int i = 0; i < n; i++) {
-            Line child = search(append(steps, branch.step(i)), limit, -1, 1, resume(node, i));
-            value += child.value() / n;
-            pWin += child.pWin() / n;
-            pDraw += child.pDraw() / n;
-            pLoss += child.pLoss() / n;
-            if (pv == null) {
-                pv = prepend(i, child.pv()); // the shown line follows the first outcome
+        Frame frame = enter(branch);
+        try {
+            for (int i = 0; i < n; i++) {
+                exploring(frame, i);
+                Line child = search(append(steps, branch.step(i)), limit, -1, 1, resume(node, i));
+                value += child.value() / n;
+                pWin += child.pWin() / n;
+                pDraw += child.pDraw() / n;
+                pLoss += child.pLoss() / n;
+                if (pv == null) {
+                    pv = prepend(i, child.pv()); // the shown line follows the first outcome
+                }
             }
+        } finally {
+            leave();
         }
         return new Line(value, pWin, pDraw, pLoss, pv);
     }
@@ -326,21 +399,27 @@ public final class Solver {
         boolean maximizing = branch.player() == 0;
         Line best = null;
         int bestIndex = -1;
-        for (int i : moveOrder(branch.labels().size(), firstTry)) {
-            Line child = search(append(steps, branch.step(i)), limit, alpha, beta, resume(node, i));
-            double v = child.value();
-            if (best == null || (maximizing ? v > best.value() : v < best.value())) {
-                best = child.withPv(prepend(i, child.pv()));
-                bestIndex = i;
+        Frame frame = enter(branch);
+        try {
+            for (int i : moveOrder(branch.labels().size(), firstTry)) {
+                exploring(frame, i);
+                Line child = search(append(steps, branch.step(i)), limit, alpha, beta, resume(node, i));
+                double v = child.value();
+                if (best == null || (maximizing ? v > best.value() : v < best.value())) {
+                    best = child.withPv(prepend(i, child.pv()));
+                    bestIndex = i;
+                }
+                if (maximizing) {
+                    alpha = Math.max(alpha, v);
+                } else {
+                    beta = Math.min(beta, v);
+                }
+                if (alpha >= beta) {
+                    break;
+                }
             }
-            if (maximizing) {
-                alpha = Math.max(alpha, v);
-            } else {
-                beta = Math.min(beta, v);
-            }
-            if (alpha >= beta) {
-                break;
-            }
+        } finally {
+            leave();
         }
         if (key != null) {
             double v = best.value();

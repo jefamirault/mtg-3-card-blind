@@ -94,7 +94,9 @@ Results that hit the budget are marked "unproven beyond turn N". A game whose re
 deterministic (a bug: usually Forge state shared between parallel games) is solved again with no
 other game running; if that fails too, it's scored as an unproven draw. While a tournament runs,
 the web UI shows each game being solved with its node count, elapsed time and how much of its
-budget it has used.
+budget it has used. Expanding a game shows the line its search is on: each decision from the start
+of the game, the option being tried there and how many of its options have been tried (the first
+30 decisions; the deeper ones change too fast to follow).
 
 ## How it works
 
