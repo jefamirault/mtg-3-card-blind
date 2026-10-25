@@ -30,13 +30,20 @@ class VintageValidatorTest {
     }
 
     @Test
-    void rejectsTwoCopiesOfRestrictedCard() {
-        assertFalse(VintageValidator.problems(DeckList.of("lotus", "Black Lotus", "Black Lotus", "Swamp")).isEmpty());
+    void acceptsCopiesOfRestrictedCard() {
+        // 3CB ignores the restricted list (issue #13)
+        assertTrue(VintageValidator.problems(DeckList.of("lotus", "Black Lotus", "Black Lotus", "Black Lotus")).isEmpty());
+    }
+
+    @Test
+    void acceptsCopiesOfNonbasicCard() {
+        assertTrue(VintageValidator.problems(DeckList.of("guides", "Goblin Guide", "Goblin Guide", "Goblin Guide")).isEmpty());
     }
 
     @Test
     void rejectsBannedCard() {
-        assertFalse(VintageValidator.problems(DeckList.of("orb", "Chaos Orb", "Mountain", "Mountain")).isEmpty());
+        assertEquals(List.of("not Vintage-legal: Chaos Orb is banned"),
+                VintageValidator.problems(DeckList.of("orb", "Chaos Orb", "Mountain", "Mountain")));
     }
 
     @Test

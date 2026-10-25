@@ -6,8 +6,9 @@ judged on is the deck you chose, not how well you play.
 
 ## Rules
 
-- Each player submits a deck of **exactly 3 Vintage-legal cards**. The Vintage banned and
-  restricted lists apply: at most one copy of a restricted card. Basic lands are unlimited.
+- Each player submits a deck of **exactly 3 Vintage-legal cards**. The Vintage banned list
+  applies, but the restricted list doesn't: **any card can be played in multiples**, restricted
+  ones included (three Black Lotus is a legal deck).
 - The game starts with all 3 cards in your opening hand and nothing in your library. There are
   no mulligans, and both players see everything.
 - **You can't lose by drawing from an empty library.** Your draw step just does nothing.

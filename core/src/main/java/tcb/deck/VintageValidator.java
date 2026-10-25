@@ -13,7 +13,11 @@ import forge.item.PaperCard;
 import forge.model.FModel;
 import tcb.engine.ForgeEnv;
 
-/** Checks that an entry is exactly 3 cards and Vintage-legal (banned + restricted lists from Forge). */
+/**
+ * Checks that an entry is exactly 3 cards, each Vintage-legal (Forge's Vintage sets and banned
+ * list). Any number of copies of a card is allowed, restricted cards included: 3CB ignores the
+ * restricted list.
+ */
 public final class VintageValidator {
     public static final int DECK_SIZE = 3;
 
@@ -44,9 +48,13 @@ public final class VintageValidator {
         if (!problems.isEmpty()) {
             return problems;
         }
-        String problem = vintage.getDeckConformanceProblem(toForgeDeck(deckList));
-        if (problem != null) {
-            problems.add("not Vintage-legal: " + problem);
+        // Card by card rather than Forge's getDeckConformanceProblem, which also enforces the
+        // restricted list.
+        for (String name : new LinkedHashSet<>(deckList.cards())) {
+            if (!vintage.getFilterRules().test(lookup(name))) {
+                problems.add("not Vintage-legal: " + name
+                        + (vintage.getBannedCardNames().contains(name) ? " is banned" : ""));
+            }
         }
         return problems;
     }
