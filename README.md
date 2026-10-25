@@ -25,7 +25,7 @@ judged on is the deck you chose, not how well you play.
 Requires Java 17+ and Maven ([mise](https://mise.jdx.dev) users: `mise install` sets up the pinned Maven).
 
 ```sh
-./build.sh                 # patch + build Forge into ~/.m2, then build this project
+./build.sh                 # patch + build Forge into ~/.m2 (skipped if unchanged), then this project
 ./tcb validate examples/decks
 ./tcb solve examples/decks/tusker.txt examples/decks/counterspell.txt
 ./tcb tournament examples/decks --json results.json
@@ -43,8 +43,12 @@ Hypnotic Specter
 ### Web UI
 
 ```sh
-./tcb-web --port 8080 --entries entries
+./local_server.sh          # builds if the code changed, then serves http://localhost:8080
+./local_server.sh -p 3000  # another port; also: status, stop, restart
 ```
+
+It runs in the foreground (Ctrl-C stops it) and passes `--entries`, `--history`, `--cache`,
+`--no-cache` and `--threads` on to the server. `./tcb-web` starts the server without the checks.
 
 Open http://localhost:8080 to add entries (with card-name suggestions and legality checks),
 run the tournament, and browse the standings, the matchup matrix and the optimal line of every

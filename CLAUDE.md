@@ -9,6 +9,8 @@ it safely.
   once `./build.sh` has run). `./tcb` and `./tcb-web` run the jars in `cli/target` and
   `web/target`, so rebuild before running them.
 - Don't rebuild while a `./tcb` or `./tcb-web` process is running: it replaces the jars under it.
+  `./build.sh` refuses to (FORCE=1 overrides); the user restarts the web UI with
+  `./local_server.sh restart`. `./build.sh` skips Forge unless `forge/` changed (`--full` forces).
 - Tests: `mise exec -- mvn -B -o test -pl core` (about 3 minutes; `ReductionsTest` is most of it).
   Run one class with `-Dtest=AiDecisionsTest`.
 - The `forge/` submodule always shows as modified (`m forge`): `build.sh` applies `patches/*.patch`
