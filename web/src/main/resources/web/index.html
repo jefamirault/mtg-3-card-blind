@@ -225,6 +225,24 @@
     .lbscan { height: auto; width: auto; max-width: 100%; max-height: 55vh; aspect-ratio: 5 / 7; }
     .lbpanel { width: 100%; max-width: 100%; height: auto; flex: 0 0 auto; }
   }
+  /* previous / next card of the same entry, at the sides (at the bottom on narrow screens) */
+  .lbnav {
+    position: fixed; top: 50%; translate: 0 -50%; z-index: 31;
+    width: 3rem; height: 3rem; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .35);
+    background: rgba(23, 32, 43, .7); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer;
+  }
+  .lbnav:hover, .lbnav:focus-visible { background: var(--action); border-color: var(--action); }
+  .lbnav[hidden] { display: none; }
+  .lbprev { left: 1rem; } .lbnext { right: 1rem; }
+  .lbcount {
+    position: fixed; bottom: .6rem; left: 50%; translate: -50% 0; z-index: 31;
+    color: rgba(255, 255, 255, .8); font-size: .85rem; cursor: default;
+  }
+  @media (max-width: 860px) {
+    #lightbox.stepping { padding-bottom: 3.8rem; } /* room for the arrows under the panel */
+    .lbnav { top: auto; bottom: .4rem; translate: none; width: 2.6rem; height: 2.6rem; font-size: 1.3rem; }
+    .lbcount { bottom: 1.1rem; }
+  }
   .lbrow { padding: .6rem .85rem; border-bottom: 1px solid var(--rule); }
   .lbrow:last-child { border-bottom: 0; }
   .lbtitle { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
@@ -318,6 +336,9 @@
     <img class="lbscan" alt="">
     <div class="lbpanel"></div>
   </div>
+  <button class="lbnav lbprev" type="button" aria-label="Previous card" title="Previous card (←)" hidden>‹</button>
+  <button class="lbnav lbnext" type="button" aria-label="Next card" title="Next card (→)" hidden>›</button>
+  <span class="lbcount" hidden></span>
 </div>
 
 <script>
@@ -396,9 +417,9 @@ $("#pick-all").addEventListener("click", () => pickAll(true));
 $("#pick-none").addEventListener("click", () => pickAll(false));
 
 function hand(cards) {
-  return el("div", { class: "hand", "aria-label": cards.join(", ") }, ...cards.map((c) => {
+  return el("div", { class: "hand", "aria-label": cards.join(", ") }, ...cards.map((c, i) => {
     const card = el("button", { class: "card", type: "button", title: "Show " + c }, el("span", { class: "card-name" }, c));
-    card.addEventListener("click", () => openCard(c));
+    card.addEventListener("click", () => openCard(c, cards, i));
     fetchCard(c).then((data) => {
       const src = (data.image_uris || data.card_faces?.[0]?.image_uris)?.small;
       if (!src) return;
@@ -410,13 +431,14 @@ function hand(cards) {
   }));
 }
 
-// A card name that opens its details, for lists of cards in running text.
-function cardLink(name) {
+// A card name that opens its details, for lists of cards in running text. With the list it's in
+// (and its index there), the card view can step through the rest of the list.
+function cardLink(name, group, index) {
   const link = el("button", { class: "cardlink", type: "button", title: "Show " + name }, name);
-  link.addEventListener("click", () => openCard(name));
+  link.addEventListener("click", () => openCard(name, group, index));
   return link;
 }
-const cardLinks = (names) => names.flatMap((n, i) => i ? [", ", cardLink(n)] : [cardLink(n)]);
+const cardLinks = (names) => names.flatMap((n, i) => i ? [", ", cardLink(n, names, i)] : [cardLink(n, names, i)]);
 
 // ---- card details: the scan and a Scryfall-style panel, fetched from the Scryfall API when a
 // card is opened and cached for the session.
@@ -426,6 +448,11 @@ const panel = lightbox.querySelector(".lbpanel");
 const cardCache = new Map(); // name -> promise of the Scryfall card object
 let lbCard = null;           // name of the card being shown, so a late fetch can't fill in another
 let lbReturn = null;
+let lbGroup = [];            // the cards of the entry it was opened from, for previous / next
+let lbIndex = 0;
+const lbPrev = lightbox.querySelector(".lbprev");
+const lbNext = lightbox.querySelector(".lbnext");
+const lbCount = lightbox.querySelector(".lbcount");
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const scryfallSearch = (name) => "https://scryfall.com/search?q=" + encodeURIComponent(`!"${name}"`);
@@ -517,8 +544,14 @@ function showScan(src, alt) {
   if (src && scan.complete) scan.style.visibility = "visible";
 }
 
-function openCard(name) {
+function openCard(name, group = [name], index = group.indexOf(name)) {
   lbCard = name;
+  lbGroup = group;
+  lbIndex = index;
+  const many = group.length > 1;
+  lbPrev.hidden = lbNext.hidden = lbCount.hidden = !many;
+  lightbox.classList.toggle("stepping", many);
+  lbCount.textContent = many ? `${index + 1} of ${group.length}` : "";
   lightbox.setAttribute("aria-label", name);
   showScan(null, name);
   scan.classList.remove("flips");
@@ -543,9 +576,11 @@ function openCard(name) {
     if (lbCard !== name || lightbox.hidden) return;
     panel.innerHTML = panelBasic(name, "Couldn't load this card from Scryfall.");
   });
-  if (lightbox.hidden) lbReturn = document.activeElement;
-  lightbox.hidden = false;
-  lightbox.focus();
+  if (lightbox.hidden) {
+    lbReturn = document.activeElement;
+    lightbox.hidden = false;
+    lightbox.focus(); // stepping through cards leaves focus on the arrow pressed
+  }
 }
 
 function closeCard() {
@@ -556,9 +591,22 @@ function closeCard() {
   lbReturn = null;
 }
 
-// A click outside the scan and the panel closes it.
-lightbox.addEventListener("click", (e) => { if (!e.target.closest(".lbpanel, .lbscan")) closeCard(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); });
+// Shows the next (step 1) or previous (step -1) card of the group, wrapping around.
+function stepCard(step) {
+  if (lightbox.hidden || lbGroup.length < 2) return;
+  const i = (lbIndex + step + lbGroup.length) % lbGroup.length;
+  openCard(lbGroup[i], lbGroup, i);
+}
+lbPrev.addEventListener("click", () => stepCard(-1));
+lbNext.addEventListener("click", () => stepCard(1));
+
+// A click outside the scan, the panel and the arrows closes it.
+lightbox.addEventListener("click", (e) => { if (!e.target.closest(".lbpanel, .lbscan, .lbnav, .lbcount")) closeCard(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeCard();
+  else if (e.key === "ArrowLeft") stepCard(-1);
+  else if (e.key === "ArrowRight") stepCard(1);
+});
 
 async function loadEntries() {
   const { data } = await api("GET", "/api/entries");
