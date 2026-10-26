@@ -45,6 +45,26 @@ class EntryImportTest {
         Block b = EntryImport.parse("Goblin Guide\nMountain\nMountain\n").get(0);
         assertEquals("Goblin Guide - Mountain", b.name());
         assertEquals(List.of("Goblin Guide", "Mountain", "Mountain"), b.cards());
+        assertTrue(b.generated());
+    }
+
+    @Test
+    void longCardNamesAreLeftOutWholeNotCutMidWord() {
+        // "Chancellor of the Annex - Fountain of Cho" is 41 characters, one over the limit
+        Block b = EntryImport.parse("Chancellor of the Annex\nFountain of Cho\nChalice of the Void\n").get(0);
+        assertEquals("Chancellor of the Annex", b.name());
+        assertEquals("Leyline of Anticipation - Vryn Wingmare",
+                EntryImport.parse("Leyline of Anticipation\nVryn Wingmare\nBlack Lotus\n").get(0).name());
+        // a later card that fits still goes in
+        assertEquals("Ulamog the Infinite Gyre - Island",
+                EntryImport.parse("Ulamog, the Infinite Gyre\nEmrakul, the Aeons Torn\nIsland\n").get(0).name());
+    }
+
+    @Test
+    void numberedNamesStayWithinTheLimit() {
+        assertEquals("Goblin Guide 2", EntryImport.numbered("Goblin Guide", 2));
+        assertEquals("Leyline of Anticipation - Vryn 2", EntryImport.numbered("Leyline of Anticipation - Vryn Wingmare", 2));
+        assertTrue(EntryImport.numbered("Leyline of Anticipation - Vryn Wingmare", 10).length() <= 40);
     }
 
     @Test

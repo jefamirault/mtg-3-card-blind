@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -61,7 +62,7 @@ import tcb.solve.Turns;
  */
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
-    private static final int MAX_NAME = 40;
+    private static final int MAX_NAME = EntryImport.MAX_NAME;
     private static final int MAX_NOTES = 2000;
     private static final Solver.Options DEFAULTS = Solver.Options.defaults();
     private static final int MAX_TIME_SECONDS = 24 * 60 * 60;
@@ -326,6 +327,7 @@ public final class WebServer {
         int imported = 0;
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         for (EntryImport.Block b : EntryImport.parse(text)) {
+            b = uniqueName(b, seen);
             List<String> problems = new ArrayList<>(b.problems());
             if (!validName(b.name())) {
                 problems.add("The name has to be letters, digits, spaces, - _ or ' (up to " + MAX_NAME + " characters).");
@@ -357,6 +359,33 @@ public final class WebServer {
             out.add(m);
         }
         sendJson(ex, 200, Map.of("entries", out, "imported", imported, "applied", apply));
+    }
+
+    /**
+     * A name made from the cards gets a number ("... 2") when another block in this import has it,
+     * or an existing entry with different cards does. An entry with the same cards is the same
+     * deck, so it keeps the name and is skipped or replaced like a named one.
+     */
+    private EntryImport.Block uniqueName(EntryImport.Block b, Set<String> seen) throws IOException {
+        if (!b.generated()) {
+            return b;
+        }
+        String name = b.name();
+        for (int n = 2; seen.contains(name) || takenByOtherCards(name, b.cards()); n++) {
+            name = EntryImport.numbered(b.name(), n);
+        }
+        return b.withName(name);
+    }
+
+    private boolean takenByOtherCards(String name, List<String> cards) throws IOException {
+        if (!validName(name) || !Files.exists(entryFile(name))) {
+            return false;
+        }
+        List<String> theirs = new ArrayList<>(EntryFile.read(entryFile(name)).deck().cards());
+        List<String> ours = new ArrayList<>(cards);
+        Collections.sort(theirs);
+        Collections.sort(ours);
+        return !theirs.equals(ours);
     }
 
     /** Every entry in the import format, as a file to save. */

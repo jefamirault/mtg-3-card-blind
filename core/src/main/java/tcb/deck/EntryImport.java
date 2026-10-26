@@ -29,15 +29,26 @@ public final class EntryImport {
     private EntryImport() {
     }
 
-    /** One block of the text: the entry it describes, and what's wrong with the block itself. */
-    public record Block(String name, List<String> cards, String notes, List<String> problems) {
+    /**
+     * One block of the text: the entry it describes, and what's wrong with the block itself.
+     * {@code generated} is true when the name was made from the cards.
+     */
+    public record Block(String name, List<String> cards, String notes, List<String> problems, boolean generated) {
+        public Block(String name, List<String> cards, String notes, List<String> problems) {
+            this(name, cards, notes, problems, false);
+        }
+
+        public Block withName(String newName) {
+            return new Block(newName, cards, notes, problems, generated);
+        }
     }
 
     private static final Pattern NOTES = Pattern.compile("^#\\s*notes:\\s?(.*)$");
     private static final Pattern OTHER_META = Pattern.compile("^#\\s*(created|updated):.*$");
     private static final Pattern EXPLICIT_NAME = Pattern.compile("^(?:name:|#)\\s*(.+)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern COUNTED = Pattern.compile("^\\d+\\s*x?\\s+.+$");
-    private static final int MAX_NAME = 40;
+    /** The longest entry name. */
+    public static final int MAX_NAME = 40;
 
     public static List<Block> parse(String text) {
         ForgeEnv.init(); // telling names from cards needs the card database
@@ -87,10 +98,11 @@ public final class EntryImport {
         } catch (IllegalArgumentException e) {
             problems.add(e.getMessage());
         }
-        if (name == null) {
+        boolean generated = name == null;
+        if (generated) {
             name = nameFrom(cards);
         }
-        return new Block(name, cards, String.join("\n", notes), problems);
+        return new Block(name, cards, String.join("\n", notes), problems, generated);
     }
 
     private static boolean firstLineIsName(List<String> body) {
@@ -109,14 +121,47 @@ public final class EntryImport {
         }
     }
 
-    /** "Goblin Guide - Mountain": a name for an unnamed block, in the characters names allow. */
+    /**
+     * "Goblin Guide - Mountain": a name for an unnamed block, in the characters names allow. Cards
+     * that don't fit in {@link #MAX_NAME} are left out whole; a first card that's too long on its
+     * own is cut at a word.
+     */
     static String nameFrom(List<String> cards) {
-        String name = String.join(" - ", new LinkedHashSet<>(cards)).replaceAll("[^A-Za-z0-9 _'-]", "").strip();
-        name = name.replaceAll("^[^A-Za-z0-9]+", "");
-        if (name.length() > MAX_NAME) {
-            name = name.substring(0, MAX_NAME).strip();
+        String name = "";
+        for (String card : new LinkedHashSet<>(cards)) {
+            String part = card.replaceAll("[^A-Za-z0-9 _'-]", "").replaceAll("\\s+", " ").strip();
+            if (name.isEmpty()) {
+                part = part.replaceAll("^[^A-Za-z0-9]+", "");
+            }
+            if (part.isEmpty()) {
+                continue;
+            }
+            String longer = name.isEmpty() ? part : name + " - " + part;
+            if (longer.length() <= MAX_NAME) {
+                name = longer;
+            } else if (name.isEmpty()) {
+                name = cutAtWord(part, MAX_NAME);
+            }
         }
         return name.isEmpty() ? "Imported entry" : name;
+    }
+
+    /** The name with " n" after it, shortened at a word if needed to stay within {@link #MAX_NAME}. */
+    public static String numbered(String name, int n) {
+        String suffix = " " + n;
+        return cutAtWord(name, MAX_NAME - suffix.length()) + suffix;
+    }
+
+    private static String cutAtWord(String s, int max) {
+        if (s.length() <= max) {
+            return s;
+        }
+        String cut = s.substring(0, max);
+        int space = cut.lastIndexOf(' ');
+        if (space > 0 && !Character.isWhitespace(s.charAt(max))) {
+            cut = cut.substring(0, space);
+        }
+        return cut.replaceAll("[ -]+$", "");
     }
 
     /** Entries in the import format: each one's name, notes and cards, blank lines between. */
