@@ -57,7 +57,10 @@ Open http://localhost:8080 to add entries (with card-name suggestions and legali
 run the tournament, and browse the standings, the matchup matrix and the optimal line of every
 game. Entries are saved as deck files in the `--entries` folder, so the CLI can run the same
 field: `./tcb tournament entries`. The first time it runs (no `--entries` folder yet), it starts
-the folder with the sample decks in `examples/entries`. Tick the entries to include to run a
+the folder with the sample decks in `examples/entries`. An entry can have notes, and shows when it
+was added and last edited (*Edit* changes its cards, name or notes); these are kept as
+`# created:` / `# updated:` / `# notes:` comment lines at the top of its deck file, which the CLI
+ignores. Tick the entries to include to run a
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
 delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn

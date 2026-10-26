@@ -96,6 +96,7 @@
   .card.slot { display: grid; place-items: center; border-style: dashed; background: none; color: var(--ink-soft); font-size: 1.1rem; box-shadow: none; }
   .problems { margin: 0; padding-left: 1.1rem; color: var(--loss); font-size: .9rem; }
   form .primary { justify-self: start; margin-top: .3rem; }
+  .form-buttons .primary { margin-top: 0; }
 
   /* --- entries as hands of three --- */
   .entries { list-style: none; margin: 0; padding: 0; }
@@ -105,6 +106,16 @@
   }
   .entry-name { font-weight: 600; }
   .entry-note { font-size: .85rem; color: var(--loss); }
+  .entry-notes { font-size: .85rem; white-space: pre-line; overflow-wrap: anywhere; margin-top: .15rem; }
+  .entry-dates { font-size: .78rem; color: var(--ink-soft); margin-top: .15rem; }
+  .entry-actions { display: flex; flex-direction: column; align-items: flex-end; }
+  .entry.editing { background: var(--stock); box-shadow: inset 3px 0 0 var(--action); }
+  textarea {
+    width: 100%; min-height: 3.6rem; padding: .45rem .6rem; background: var(--stock); resize: vertical;
+    border: 1px solid var(--rule); border-radius: 3px; font: inherit; color: inherit;
+  }
+  .form-buttons { display: flex; gap: .8rem; align-items: center; }
+  .editing-note { margin: 0; font-size: .9rem; color: var(--action); font-weight: 600; }
   .remove {
     border: 0; background: none; color: var(--ink-soft); cursor: pointer; padding: .2rem .4rem; font-size: .9rem;
   }
@@ -395,6 +406,7 @@
   <section aria-labelledby="entries-h">
     <h2 id="entries-h">Entries</h2>
     <form id="add" autocomplete="off">
+      <p class="editing-note" id="editing-note" hidden></p>
       <label for="name">Entry name</label>
       <input type="text" id="name" name="name" maxlength="40" required>
       <label for="c1">Cards</label>
@@ -405,8 +417,13 @@
       </div>
       <div class="hand preview" id="add-preview" aria-label="The cards as you've entered them"></div>
       <datalist id="card-names"></datalist>
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" maxlength="2000" rows="2"></textarea>
       <ul class="problems" id="add-problems" aria-live="polite"></ul>
-      <button class="primary" type="submit">Add entry</button>
+      <div class="form-buttons">
+        <button class="primary" type="submit" id="add-submit">Add entry</button>
+        <button class="remove" type="button" id="edit-cancel" hidden>Cancel</button>
+      </div>
     </form>
     <p class="pick" id="pick" hidden><span id="pick-count"></span>
       <button type="button" id="pick-all">All</button><button type="button" id="pick-none">None</button></p>
@@ -481,6 +498,7 @@ async function api(method, path, body) {
 let suggestTimer;
 const slotInputs = [...document.querySelectorAll(".slots input")];
 const slotCards = [null, null, null]; // the card name each field matches, or null
+let editing = null; // name of the entry the form is changing; null when it adds one
 for (const [i, input] of slotInputs.entries()) {
   input.addEventListener("input", () => {
     clearTimeout(suggestTimer);
@@ -769,6 +787,7 @@ async function loadEntries() {
     const remove = el("button", { class: "remove", type: "button", "aria-label": "Remove " + e.name }, "Remove");
     remove.addEventListener("click", async () => {
       await api("DELETE", "/api/entries/" + encodeURIComponent(e.name));
+      if (editing === e.name) endEdit();
       loadEntries();
     });
     const include = el("input", { type: "checkbox", value: e.name, "aria-label": "Include " + e.name + " in the tournament" });
@@ -777,25 +796,68 @@ async function loadEntries() {
       saveLeftOut();
       updatePick();
     });
-    return el("li", { class: "entry" + (illegal ? " illegal" : "") },
+    const edit = el("button", { class: "remove", type: "button", "aria-label": "Edit " + e.name }, "Edit");
+    edit.addEventListener("click", () => startEdit(e));
+    return el("li", { class: "entry" + (illegal ? " illegal" : "") + (editing === e.name ? " editing" : "") },
       include,
       hand(e.cards),
       el("div", {}, el("div", { class: "entry-name" }, e.name),
-        illegal ? el("div", { class: "entry-note" }, e.problems.join("; ")) : null),
-      remove);
+        illegal ? el("div", { class: "entry-note" }, e.problems.join("; ")) : null,
+        e.notes ? el("div", { class: "entry-notes" }, e.notes) : null,
+        el("div", { class: "entry-dates" }, entryDates(e))),
+      el("div", { class: "entry-actions" }, edit, remove));
   }));
   updatePick();
 }
 
+// "Added Oct 25, 2026 · edited Oct 26, 2026"; files from before entries had dates show when they last changed
+const day = (iso) => new Date(iso).toLocaleDateString([], { dateStyle: "medium" });
+function entryDates(e) {
+  if (!e.created) return "Last changed " + day(e.updated);
+  const edited = new Date(e.updated) - new Date(e.created) > 60_000;
+  return "Added " + day(e.created) + (edited ? " · edited " + day(e.updated) : "");
+}
+
+// The form adds an entry, or, after Edit, changes that entry (see editing).
+function startEdit(e) {
+  editing = e.name;
+  $("#name").value = e.name;
+  for (const [i, input] of slotInputs.entries()) input.value = e.cards[i] || "";
+  $("#notes").value = e.notes || "";
+  slotCards.splice(0, 3, ...[0, 1, 2].map((i) => e.cards[i] || null));
+  renderPreview();
+  $("#editing-note").textContent = "Editing " + e.name;
+  $("#editing-note").hidden = false;
+  $("#add-submit").textContent = "Save changes";
+  $("#edit-cancel").hidden = false;
+  showProblems($("#add-problems"), []);
+  $("#add").scrollIntoView({ block: "nearest" });
+  $("#name").focus();
+  loadEntries();
+}
+function endEdit() {
+  editing = null;
+  $("#add").reset();
+  slotCards.fill(null);
+  renderPreview();
+  $("#editing-note").hidden = true;
+  $("#add-submit").textContent = "Add entry";
+  $("#edit-cancel").hidden = true;
+  showProblems($("#add-problems"), []);
+}
+$("#edit-cancel").addEventListener("click", () => { endEdit(); loadEntries(); });
+
 $("#add").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const cards = ["#c1", "#c2", "#c3"].map((s) => $(s).value.trim());
-  const { ok, data } = await api("POST", "/api/entries", { name: $("#name").value.trim(), cards });
+  const body = { name: $("#name").value.trim(), cards, notes: $("#notes").value };
+  const { ok, data } = editing
+    ? await api("PUT", "/api/entries/" + encodeURIComponent(editing), body)
+    : await api("POST", "/api/entries", body);
   if (!ok) { showProblems($("#add-problems"), data.problems || [data.error]); return; }
-  showProblems($("#add-problems"), []);
-  ev.target.reset();
-  slotCards.fill(null);
-  renderPreview();
+  // a renamed entry stays in or out of the tournament as it was
+  if (editing && editing !== data.name && leftOut.delete(editing)) { leftOut.add(data.name); saveLeftOut(); }
+  endEdit();
   $("#name").focus();
   loadEntries();
 });

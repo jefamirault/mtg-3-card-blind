@@ -9,8 +9,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -35,6 +37,7 @@ import forge.game.GameFormat;
 import forge.item.PaperCard;
 import forge.model.FModel;
 import tcb.deck.DeckList;
+import tcb.deck.EntryFile;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
 import tcb.engine.NondeterministicReplayException;
@@ -57,6 +60,7 @@ import tcb.solve.Turns;
 public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     private static final int MAX_NAME = 40;
+    private static final int MAX_NOTES = 2000;
     private static final Solver.Options DEFAULTS = Solver.Options.defaults();
     private static final int MAX_TIME_SECONDS = 24 * 60 * 60;
     private static final long MIN_NODES = 1_000, MAX_NODES = 1_000_000_000;
@@ -164,7 +168,9 @@ public final class WebServer {
             } else if (path.equals("/api/entries") && method.equals("GET")) {
                 sendJson(ex, 200, listEntries());
             } else if (path.equals("/api/entries") && method.equals("POST")) {
-                addEntry(ex);
+                saveEntry(ex, null);
+            } else if (path.startsWith("/api/entries/") && method.equals("PUT")) {
+                saveEntry(ex, URLDecoder.decode(path.substring("/api/entries/".length()), StandardCharsets.UTF_8));
             } else if (path.startsWith("/api/entries/") && method.equals("DELETE")) {
                 deleteEntry(ex, URLDecoder.decode(path.substring("/api/entries/".length()), StandardCharsets.UTF_8));
             } else if (path.equals("/api/tournament") && method.equals("GET")) {
@@ -226,12 +232,19 @@ public final class WebServer {
 
     private List<Map<String, Object>> listEntries() throws IOException {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (DeckList deck : readEntries()) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("name", deck.name());
-            m.put("cards", deck.cards());
-            m.put("problems", VintageValidator.problems(deck));
-            out.add(m);
+        try (Stream<Path> files = Files.list(entriesDir)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".txt")).sorted().toList()) {
+                EntryFile entry = EntryFile.read(f);
+                DeckList deck = entry.deck();
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("name", deck.name());
+                m.put("cards", deck.cards());
+                m.put("problems", VintageValidator.problems(deck));
+                m.put("created", entry.created() == null ? null : entry.created().toString());
+                m.put("updated", entry.updated().toString());
+                m.put("notes", entry.notes());
+                out.add(m);
+            }
         }
         return out;
     }
@@ -246,15 +259,30 @@ public final class WebServer {
         return decks;
     }
 
-    private void addEntry(HttpExchange ex) throws IOException {
+    /**
+     * Adds an entry ({@code original} null) or changes the entry called {@code original}: its
+     * cards, notes, and possibly its name. The body has {@code name}, {@code cards} and
+     * {@code notes}. A changed entry keeps its created date.
+     */
+    private void saveEntry(HttpExchange ex, String original) throws IOException {
         JsonObject body = GSON.fromJson(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8), JsonObject.class);
         String name = body != null && body.has("name") ? body.get("name").getAsString().strip() : "";
         List<String> cards = new ArrayList<>();
         if (body != null && body.has("cards")) {
             body.getAsJsonArray("cards").forEach(c -> cards.add(c.getAsString().strip()));
         }
-        if (!name.matches("[A-Za-z0-9][A-Za-z0-9 _'-]*") || name.length() > MAX_NAME) {
+        String notes = body != null && body.has("notes") && !body.get("notes").isJsonNull() ? body.get("notes").getAsString().strip() : "";
+        Path old = original == null ? null : entryFile(original);
+        if (old != null && (!validName(original) || !Files.exists(old))) {
+            sendJson(ex, 404, Map.of("problems", List.of("There's no entry called " + original + " any more.")));
+            return;
+        }
+        if (!validName(name)) {
             sendJson(ex, 400, Map.of("problems", List.of("Name the entry with letters, digits, spaces, - _ or ' (up to " + MAX_NAME + " characters).")));
+            return;
+        }
+        if (notes.length() > MAX_NOTES) {
+            sendJson(ex, 400, Map.of("problems", List.of("Keep the notes under " + MAX_NOTES + " characters.")));
             return;
         }
         DeckList deck = new DeckList(name, cards);
@@ -264,12 +292,21 @@ public final class WebServer {
             return;
         }
         Path file = entryFile(name);
-        if (Files.exists(file)) {
+        if (Files.exists(file) && !name.equals(original)) {
             sendJson(ex, 409, Map.of("problems", List.of("There's already an entry called " + name + ". Pick another name or remove it first.")));
             return;
         }
-        Files.writeString(file, String.join("\n", cards) + "\n");
-        sendJson(ex, 201, Map.of("name", name, "cards", cards));
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Instant created = old == null ? now : EntryFile.read(old).created();
+        new EntryFile(deck, created, now, notes).write(file);
+        if (old != null && !old.equals(file)) {
+            Files.delete(old);
+        }
+        sendJson(ex, original == null ? 201 : 200, Map.of("name", name, "cards", cards));
+    }
+
+    private static boolean validName(String name) {
+        return name.matches("[A-Za-z0-9][A-Za-z0-9 _'-]*") && name.length() <= MAX_NAME;
     }
 
     private void deleteEntry(HttpExchange ex, String name) throws IOException {
