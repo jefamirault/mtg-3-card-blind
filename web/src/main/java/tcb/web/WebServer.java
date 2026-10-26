@@ -196,8 +196,14 @@ public final class WebServer {
                 getTree(ex, parts[3], Integer.parseInt(parts[5]));
             } else if (path.startsWith("/api/history/") && method.equals("GET")) {
                 getHistory(ex, path.substring("/api/history/".length()));
+            } else if (path.matches("/api/history/[^/]+/trees") && method.equals("DELETE")) {
+                deleteTrees(ex, path.split("/")[3]);
             } else if (path.startsWith("/api/history/") && method.equals("DELETE")) {
                 deleteHistory(ex, path.substring("/api/history/".length()));
+            } else if (path.equals("/api/stats") && method.equals("GET")) {
+                sendJson(ex, 200, DataStats.compute(entriesDir, historyDir, cache));
+            } else if (path.equals("/api/cache/clear-stale") && method.equals("POST")) {
+                clearStaleCache(ex);
             } else {
                 sendJson(ex, 404, Map.of("error", "Not found: " + method + " " + path));
             }
@@ -693,7 +699,10 @@ public final class WebServer {
             sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
             return;
         }
-        sendJson(ex, 200, GSON.fromJson(Files.readString(historyFile(id)), JsonObject.class));
+        JsonObject saved = GSON.fromJson(Files.readString(historyFile(id)), JsonObject.class);
+        // Whether its search trees are still there: they can be deleted on their own (deleteTrees).
+        saved.addProperty("trees", Files.isDirectory(treesDir(id)));
+        sendJson(ex, 200, saved);
     }
 
     private void deleteHistory(HttpExchange ex, String id) throws IOException {
@@ -701,15 +710,42 @@ public final class WebServer {
             sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
             return;
         }
+        removeTrees(id);
+        sendJson(ex, 200, Map.of("removed", id));
+    }
+
+    /** Deletes a saved tournament's search trees and keeps its results. */
+    private void deleteTrees(HttpExchange ex, String id) throws IOException {
+        if (!validId(id) || !Files.isDirectory(treesDir(id))) {
+            sendJson(ex, 404, Map.of("error", "No search trees saved for " + id));
+            return;
+        }
+        sendJson(ex, 200, Map.of("removed", id, "bytes", removeTrees(id)));
+    }
+
+    /** Deletes {@code <id>.trees} if there is one; returns the bytes freed. */
+    private long removeTrees(String id) throws IOException {
+        long bytes = 0;
         if (Files.isDirectory(treesDir(id))) {
             try (Stream<Path> files = Files.list(treesDir(id))) {
                 for (Path f : files.toList()) {
+                    bytes += Files.size(f);
                     Files.delete(f);
                 }
             }
             Files.delete(treesDir(id));
         }
-        sendJson(ex, 200, Map.of("removed", id));
+        return bytes;
+    }
+
+    /** Deletes the cache files no lookup can hit any more: those written by an older engine. */
+    private void clearStaleCache(HttpExchange ex) throws IOException {
+        if (cache == null) {
+            sendJson(ex, 409, Map.of("error", "The server is running without a result cache (--no-cache)."));
+            return;
+        }
+        ResultCache.Usage removed = cache.clearStale();
+        sendJson(ex, 200, Map.of("files", removed.staleFiles(), "bytes", removed.staleBytes()));
     }
 
     /**

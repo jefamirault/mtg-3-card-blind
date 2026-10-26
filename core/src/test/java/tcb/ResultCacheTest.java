@@ -94,6 +94,43 @@ class ResultCacheTest {
     }
 
     @Test
+    void lookupsAreCounted() {
+        ResultCache cache = new ResultCache(dir);
+        cache.get(GUIDE, ISLANDS, 0, OPTS);
+        cache.put(GUIDE, ISLANDS, 0, OPTS, WIN);
+        cache.get(GUIDE, ISLANDS, 0, OPTS);
+        cache.get(GUIDE, ISLANDS, 0, OPTS);
+        assertEquals(2, cache.hits());
+        assertEquals(1, cache.misses());
+    }
+
+    @Test
+    void filesFromAnotherEngineAreStaleAndCanBeCleared() throws Exception {
+        ResultCache cache = new ResultCache(dir);
+        cache.put(GUIDE, ISLANDS, 0, OPTS, WIN);
+        cache.put(GUIDE, PLAINS, 0, OPTS, WIN);
+        Path old = dir.resolve("old.json");
+        Files.writeString(old, "{\"key\": {\"engine\": \"0000000000000000\"}, \"result\": {}}");
+        Path broken = dir.resolve("broken.json");
+        Files.writeString(broken, "{ not json");
+        Files.writeString(dir.resolve("leftover.json.tmp"), "half a file"); // not a result file
+        long staleBytes = Files.size(old) + Files.size(broken);
+
+        ResultCache.Usage u = cache.usage();
+        assertEquals(2, u.currentFiles());
+        assertEquals(2, u.staleFiles());
+        assertEquals(staleBytes, u.staleBytes());
+
+        ResultCache.Usage removed = cache.clearStale();
+        assertEquals(2, removed.staleFiles());
+        assertEquals(staleBytes, removed.staleBytes());
+        assertFalse(Files.exists(old));
+        assertFalse(Files.exists(broken));
+        assertEquals(new ResultCache.Usage(2, u.currentBytes(), 0, 0), cache.usage());
+        assertEquals(WIN, cache.get(GUIDE, ISLANDS, 0, OPTS));
+    }
+
+    @Test
     void secondTournamentOnlySolvesNewPairings() {
         ForgeEnv.init();
         ResultCache cache = new ResultCache(dir);

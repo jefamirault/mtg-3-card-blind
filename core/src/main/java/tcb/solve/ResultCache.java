@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -49,14 +50,35 @@ public final class ResultCache {
     private static volatile String fingerprint;
 
     private final Path dir;
+    /** Lookups since this cache was opened (see {@link #hits()}). */
+    private final AtomicLong hits = new AtomicLong(), misses = new AtomicLong();
 
     public ResultCache(Path dir) {
         this.dir = dir;
     }
 
+    public Path dir() {
+        return dir;
+    }
+
+    /** Lookups since this cache was opened that found a usable result. */
+    public long hits() {
+        return hits.get();
+    }
+
+    /** Lookups since this cache was opened that didn't, so the game was solved. */
+    public long misses() {
+        return misses.get();
+    }
+
     /** The cached result for this game, or null if there is none that these options can use. */
     public GameResult get(DeckList a, DeckList b, int startingPlayer, Options options) {
-        Path file = file(a, b, startingPlayer, options);
+        GameResult r = read(file(a, b, startingPlayer, options), options);
+        (r == null ? misses : hits).incrementAndGet();
+        return r;
+    }
+
+    private static GameResult read(Path file, Options options) {
         if (!Files.isRegularFile(file)) {
             return null;
         }
@@ -115,6 +137,63 @@ public final class ResultCache {
             }
         } catch (IOException e) {
             System.err.println("warning: can't write " + file + ": " + e);
+        }
+    }
+
+    /**
+     * The files in the cache and their total size, split by whether they were written by this
+     * engine. Stale ones (another engine, or unreadable) can never be hit again.
+     */
+    public record Usage(int currentFiles, long currentBytes, int staleFiles, long staleBytes) {}
+
+    public Usage usage() throws IOException {
+        int currentFiles = 0, staleFiles = 0;
+        long currentBytes = 0, staleBytes = 0;
+        for (Path f : files()) {
+            long size = Files.size(f);
+            if (isStale(f)) {
+                staleFiles++;
+                staleBytes += size;
+            } else {
+                currentFiles++;
+                currentBytes += size;
+            }
+        }
+        return new Usage(currentFiles, currentBytes, staleFiles, staleBytes);
+    }
+
+    /** Deletes the stale files (see {@link #usage()}); returns how many files and bytes went. */
+    public Usage clearStale() throws IOException {
+        int files = 0;
+        long bytes = 0;
+        for (Path f : files()) {
+            if (isStale(f)) {
+                long size = Files.size(f);
+                if (Files.deleteIfExists(f)) {
+                    files++;
+                    bytes += size;
+                }
+            }
+        }
+        return new Usage(0, 0, files, bytes);
+    }
+
+    /** The cache's result files (not the temporary ones {@link #put} writes first). */
+    private List<Path> files() throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        try (Stream<Path> files = Files.list(dir)) {
+            return files.filter(p -> p.toString().endsWith(".json") && Files.isRegularFile(p)).sorted().toList();
+        }
+    }
+
+    private static boolean isStale(Path file) {
+        try {
+            JsonObject o = GSON.fromJson(Files.readString(file), JsonObject.class);
+            return !o.getAsJsonObject("key").get("engine").getAsString().equals(fingerprint());
+        } catch (IOException | RuntimeException e) {
+            return true;
         }
     }
 

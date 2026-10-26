@@ -403,6 +403,39 @@
   .leg-banned { background: var(--loss); color: #fff; }
   .leg-not_legal { background: #DDE1E8; color: var(--ink-soft); }
 
+  /* --- views: the tournament (main) or the stats page --- */
+  .views { display: flex; gap: 1.2rem; padding: 0 clamp(1rem, 4vw, 3rem); border-bottom: 1px solid var(--rule); }
+  .views a { padding: .55rem 0 .45rem; color: var(--ink-soft); text-decoration: none; font-weight: 600; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .views a:hover { color: var(--ink); }
+  .views a[aria-current=page] { color: var(--ink); border-bottom-color: var(--action); }
+  main[hidden], #stats[hidden] { display: none; }
+
+  /* --- stats: what the app stores --- */
+  #stats { padding: 1.75rem clamp(1rem, 4vw, 3rem) 4rem; max-width: 72rem; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .7rem; margin: 0 0 1.2rem; }
+  .tile { background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; padding: .65rem .8rem; }
+  .tile .label { font-size: .82rem; color: var(--ink-soft); display: flex; align-items: center; gap: .4rem; }
+  .tile .value { font-size: 1.6rem; font-weight: 600; line-height: 1.2; }
+  .tile .sub { font-size: .82rem; color: var(--ink-soft); }
+  .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; flex: 0 0 auto; }
+  .space-bar { display: flex; height: 1.1rem; border-radius: 3px; overflow: hidden; background: var(--rule); gap: 2px; }
+  .space-bar > span { min-width: 2px; }
+  .k-entries { background: var(--action); } .k-history { background: var(--win); } .k-trees { background: #8A6D1F; }
+  .k-current { background: #5B6B82; } .k-stale { background: var(--loss); }
+  .stats-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 0 clamp(1.5rem, 4vw, 3rem); }
+  .facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .3rem 1rem; font-size: .92rem; }
+  .facts dt { color: var(--ink-soft); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .top-cards { list-style: none; margin: .6rem 0 0; padding: 0; font-size: .92rem; }
+  .top-cards li { display: flex; justify-content: space-between; gap: .8rem; padding: .25rem 0; border-top: 1px dotted var(--rule); }
+  .top-cards .n { color: var(--ink-soft); white-space: nowrap; }
+  .stats-action { margin-top: .8rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; font-size: .9rem; }
+  .stats-action .secondary { padding: .3rem .7rem; }
+  .trees-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); font-size: .92rem; }
+  .trees-list li { display: grid; grid-template-columns: 1fr auto auto; gap: .8rem; align-items: center; padding: .35rem 0; border-bottom: 1px solid var(--rule); }
+  .trees-list .size { color: var(--ink-soft); white-space: nowrap; }
+  .linkish { border: 0; background: none; padding: 0; color: var(--action); cursor: pointer; text-align: left; text-decoration: underline; }
+
   @media (prefers-reduced-motion: reduce) { .meter > div, button.card, .card-art { transition: none; } }
 </style>
 </head>
@@ -437,6 +470,11 @@
     </details>
   </div>
 </header>
+
+<nav class="views" aria-label="Views">
+  <a href="#" id="view-main">Tournament</a>
+  <a href="#stats" id="view-stats">Stats</a>
+</nav>
 
 <main>
   <section aria-labelledby="entries-h">
@@ -511,6 +549,11 @@
     <div id="results"></div>
   </section>
 </main>
+
+<section id="stats" aria-labelledby="stats-h" hidden>
+  <h2 id="stats-h">Stats</h2>
+  <div id="stats-body"><p class="empty">Loading…</p></div>
+</section>
 
 <div id="board" hidden role="dialog" aria-modal="true" aria-labelledby="board-title" tabindex="-1">
   <div class="bd-top">
@@ -1408,7 +1451,7 @@ async function showSaved() {
     : `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`;
   out.replaceChildren(
     el("p", { class: "shown-head" }, head, t.options ? el("br") : null, t.options ? `Search: ${describeOptions(t.options)}.` : null),
-    ...renderResults(t.results, t.options?.saveTrees ? id : null, id));
+    ...renderResults(t.results, t.trees ? id : null, id));
 }
 
 function render(status) {
@@ -1885,6 +1928,139 @@ function renderResults(r, treesId = null, replayId = null) {
   ];
 }
 
+// ---- stats: what the app stores (entries, saved tournaments, result cache) and the space it takes
+const size = (bytes) => bytes < 1024 ? `${bytes} B`
+  : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
+  : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const plural = (n, word, words = word + "s") => `${n.toLocaleString()} ${n === 1 ? word : words}`;
+
+function showView() {
+  const stats = location.hash === "#stats";
+  $("main").hidden = stats;
+  $("#stats").hidden = !stats;
+  for (const [link, on] of [["#view-main", !stats], ["#view-stats", stats]]) {
+    if (on) $(link).setAttribute("aria-current", "page"); else $(link).removeAttribute("aria-current");
+  }
+  if (stats) loadStats();
+}
+window.addEventListener("hashchange", showView);
+
+async function loadStats() {
+  const { ok, data } = await api("GET", "/api/stats");
+  const out = $("#stats-body");
+  if (!ok) { out.replaceChildren(el("p", { class: "problems" }, data.error || "Couldn't load the stats.")); return; }
+  out.replaceChildren(...renderStats(data));
+}
+
+function renderStats(s) {
+  const e = s.entries, h = s.history, c = s.cache;
+  const kinds = [
+    { k: "entries", name: "Entries", bytes: e.bytes, sub: plural(e.count, "file") },
+    { k: "history", name: "Saved tournaments", bytes: h.bytes, sub: plural(h.count, "tournament") },
+    { k: "trees", name: "Search trees", bytes: h.treeBytes, sub: `${plural(h.treeFiles, "game")} in ${plural(h.trees.length, "tournament")}` },
+    ...(c ? [
+      { k: "current", name: "Result cache", bytes: c.currentBytes, sub: plural(c.currentFiles, "game") },
+      { k: "stale", name: "Stale cache", bytes: c.staleBytes, sub: `${plural(c.staleFiles, "game")}, can't be reused` },
+    ] : []),
+  ];
+  const tile = (label, value, sub, k) => el("div", { class: "tile" },
+    el("div", { class: "label" }, k ? el("span", { class: `swatch k-${k}`, "aria-hidden": "true" }) : null, label),
+    el("div", { class: "value" }, value), sub ? el("div", { class: "sub" }, sub) : null);
+  const tiles = el("div", { class: "tiles" },
+    tile("Total", size(s.totalBytes), c ? "entries, tournaments and cache" : "entries and tournaments (no cache)"),
+    ...kinds.map((x) => tile(x.name, size(x.bytes), x.sub, x.k)));
+  const bar = el("div", { class: "space-bar", role: "img",
+    "aria-label": "Space by kind: " + kinds.map((x) => `${x.name} ${size(x.bytes)}`).join(", ") },
+    ...kinds.filter((x) => x.bytes > 0).map((x) => el("span", { class: `k-${x.k}`, style: `flex: ${x.bytes} 1 0`,
+      title: `${x.name}: ${size(x.bytes)} (${Math.round(100 * x.bytes / s.totalBytes)}%)` })));
+
+  const facts = (...rows) => el("dl", { class: "facts" }, ...rows.filter(Boolean).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+
+  const entries = el("div", {},
+    el("h3", {}, "Entries"),
+    facts(
+      ["Entries", e.count.toLocaleString()],
+      ["With notes", e.withNotes.toLocaleString()],
+      ["Different cards", e.distinctCards.toLocaleString()],
+      e.oldest ? ["Oldest", `${e.oldest.name}, ${day(e.oldest.created)}`] : null,
+      e.newest ? ["Newest", `${e.newest.name}, ${day(e.newest.created)}`] : null,
+      e.undated ? ["Undated", `${e.undated.toLocaleString()} (added before entries had dates)`] : null),
+    e.topCards.length ? el("ul", { class: "top-cards", "aria-label": "Most-used cards" }, ...e.topCards.map((t) =>
+      el("li", {}, el("button", { class: "cardlink", type: "button", "data-card": t.name }, t.name),
+        el("span", { class: "n" }, plural(t.entries, "entry", "entries")
+          + (t.copies > t.entries ? `, ${t.copies} copies` : ""))))) : null);
+  for (const b of entries.querySelectorAll(".cardlink")) b.addEventListener("click", () => openCard(b.dataset.card));
+
+  const cut = h.games - h.proven;
+  const slow = h.slowest;
+  const showTournament = (id) => { viewing = id; location.hash = ""; renderHistory(); showSaved(); };
+  const slowLink = slow ? el("button", { class: "linkish", type: "button" },
+    `${slow.a} vs ${slow.b}, ${duration(slow.seconds)}`) : null;
+  slowLink?.addEventListener("click", () => showTournament(slow.id));
+  const tournaments = el("div", {},
+    el("h3", {}, "Tournaments"),
+    facts(
+      ["Saved", h.count.toLocaleString()],
+      h.largest ? ["Largest field", `${h.largest.entries} entries (${when(h.largest.finished)})`] : null,
+      ["Games solved", h.games.toLocaleString() + (h.cached ? ` (${h.cached.toLocaleString()} from the cache)` : "")],
+      ["Proven", h.games ? `${h.proven.toLocaleString()} (${Math.round(100 * h.proven / h.games)}%)` : "0"],
+      ["Cut off", cut ? `${cut.toLocaleString()} by the node or time budget` : "none"],
+      h.notPlayed ? ["Not played", `${h.notPlayed.toLocaleString()} (tournaments stopped early)`] : null,
+      ["Total time", duration(h.seconds)],
+      slow ? ["Slowest game", slowLink] : null));
+
+  let cache;
+  if (!c) {
+    cache = el("div", {}, el("h3", {}, "Result cache"),
+      el("p", { class: "empty" }, "The server is running without a result cache (--no-cache), so every game is solved again."));
+  } else {
+    const lookups = c.hits + c.misses;
+    const msg = el("span", { "aria-live": "polite" });
+    const clear = el("button", { class: "secondary", type: "button" }, "Clear stale entries");
+    clear.disabled = c.staleFiles === 0;
+    clear.addEventListener("click", async () => {
+      if (!confirm(`Delete ${plural(c.staleFiles, "stale cache file")} (${size(c.staleBytes)})? They were solved by an older version of the solver, so they can't be reused.`)) return;
+      clear.disabled = true;
+      const { ok, data } = await api("POST", "/api/cache/clear-stale");
+      if (!ok) { msg.textContent = data.error; clear.disabled = false; return; }
+      loadStats();
+    });
+    cache = el("div", {},
+      el("h3", {}, "Result cache"),
+      facts(
+        ["Current", `${plural(c.currentFiles, "game")}, ${size(c.currentBytes)}`],
+        ["Stale", `${plural(c.staleFiles, "game")}, ${size(c.staleBytes)}`],
+        ["Since the server started", lookups ? `${c.hits.toLocaleString()} of ${plural(lookups, "lookup")} hit (${Math.round(100 * c.hits / lookups)}%)` : "no lookups yet"]),
+      el("p", { class: "caption" }, "Each solved game is kept so a tournament only solves pairings it hasn't seen. A change to the solver or Forge makes the older ones stale: nothing deletes them, so they add up."),
+      el("div", { class: "stats-action" }, clear, msg));
+  }
+
+  const trees = h.trees.length ? [
+    el("h3", {}, "Search trees"),
+    el("p", { class: "caption", style: "margin: 0 0 .6rem" }, "Deleting a tournament's trees keeps its results and replays; only the tree browser goes."),
+    el("ul", { class: "trees-list" }, ...h.trees.map((t) => {
+      const name = t.finished ? el("button", { class: "linkish", type: "button" }, when(t.finished)) : el("span", {}, `${t.id} (tournament deleted)`);
+      if (t.finished) name.addEventListener("click", () => showTournament(t.id));
+      const del = el("button", { class: "remove", type: "button", "aria-label": `Delete the search trees from ${t.finished ? when(t.finished) : t.id}` }, "Delete trees");
+      del.addEventListener("click", async () => {
+        if (!confirm(`Delete the search trees from ${t.finished ? when(t.finished) : t.id} (${size(t.bytes)})? The results are kept. This can't be undone.`)) return;
+        await api("DELETE", `/api/history/${encodeURIComponent(t.id)}/trees`);
+        saved.delete(t.id);
+        loadStats();
+      });
+      return el("li", {}, name, el("span", { class: "size" }, `${plural(t.files, "game")}, ${size(t.bytes)}`), del);
+    })),
+  ] : [];
+
+  return [
+    tiles, bar,
+    el("p", { class: "caption" }, "Space is the size of the files the app keeps in its entries, history and cache folders."),
+    el("div", { class: "stats-cols" }, entries, tournaments, cache),
+    ...trees,
+  ];
+}
+
+showView();
 loadEntries();
 loadHistory().then(poll);
 </script>

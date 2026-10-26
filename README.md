@@ -125,6 +125,13 @@ search proved about it and which was best. Values are what alpha-beta proved, so
 at most 50,000 nodes, saved gzipped in `history/<id>.trees/`. Cached games are solved again, since
 the cache has no trees.
 
+The *Stats* tab (`#stats`) shows what the app stores and the space it takes: entries, saved
+tournaments, their search trees and the result cache, split into current and stale (written by an
+older build, so it can't be hit again; nothing deletes these on its own). It also has the
+most-used cards, games solved and proven, the slowest game, and cache hits since the server
+started. From there you can clear the stale cache files and delete a tournament's search trees
+while keeping its results.
+
 ## How it works
 
 The rules engine is [Forge](https://github.com/Card-Forge/forge) (GPL-3.0). It's included as a
