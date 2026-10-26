@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.GZIPInputStream;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import com.google.gson.JsonParser;
 import tcb.deck.DeckList;
 import tcb.engine.DecisionTape;
 import tcb.engine.GameRunner;
+import tcb.solve.GameReplay;
 import tcb.solve.Solver;
 import tcb.solve.Solver.GameResult;
 import tcb.solve.Solver.Options;
@@ -98,6 +100,26 @@ class SolverTest {
             }
         }
         assertEquals(1, best.get("v").getAsDouble(), 1e-9, "the best first move wins: " + root);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void replaysTheOptimalLineWithTheBoard() {
+        GameResult r = solve(GUIDE, ISLANDS, 0);
+        Map<String, Object> replay = GameReplay.replay(GUIDE, ISLANDS, 0, r.principalVariation(), OPTS.maxTurns());
+        List<Map<String, Object>> frames = (List<Map<String, Object>>) replay.get("frames");
+        assertEquals("A wins on turn 10 (A's turn)", replay.get("end"));
+        Map<String, Object> first = frames.get(0);
+        assertEquals(1, first.get("turn"));
+        assertEquals(null, first.get("did"));
+        // every decision of the line is a step, and the last board has B at 0 life or less
+        long decisions = r.principalVariation().stream().filter(l -> !l.startsWith("=>") && !l.startsWith("(")).count();
+        assertEquals(decisions + 1, frames.size());
+        Map<String, Object> last = frames.get(frames.size() - 1);
+        Map<String, Object> b = ((List<Map<String, Object>>) last.get("players")).get(1);
+        assertTrue((Integer) b.get("life") <= 0, "B is dead at the end: " + b);
+        Map<String, Object> a = ((List<Map<String, Object>>) last.get("players")).get(0);
+        assertTrue(((List<Map<String, Object>>) a.get("battlefield")).stream().anyMatch(c -> c.get("name").equals("Goblin Guide")));
     }
 
     @Test

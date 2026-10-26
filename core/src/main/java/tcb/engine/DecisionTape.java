@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import forge.game.phase.PhaseType;
@@ -40,11 +41,37 @@ public final class DecisionTape {
     private PhaseType previousPriorityPhase;
     /** Set when the game runs on its own thread and pauses at new decisions instead of stopping. */
     private Continuation.Handoff handoff;
+    /**
+     * For {@link #following}: the decisions to make, as {@link #trace()} lines, instead of
+     * {@code steps}. Null for an ordinary tape.
+     */
+    private final List<String> expected;
+    /** Told each branching decision taken, as its trace line, before it takes effect; may be null. */
+    private Consumer<String> observer;
 
     /** @param steps the choice at each successive branching decision */
     public DecisionTape(Step[] steps, int turnLimit) {
+        this(steps, turnLimit, null);
+    }
+
+    private DecisionTape(Step[] steps, int turnLimit, List<String> expected) {
         this.steps = steps;
         this.turnLimit = turnLimit;
+        this.expected = expected;
+    }
+
+    /**
+     * A tape that replays a recorded line, such as a saved optimal line: at each branching
+     * decision it takes the option whose trace line ("A attack: Goblin Guide -> B") is the next
+     * one of {@code lines}. For watching games, not for searching.
+     */
+    public static DecisionTape following(List<String> lines, int turnLimit) {
+        return new DecisionTape(new Step[0], turnLimit, List.copyOf(lines));
+    }
+
+    /** Calls {@code observer} with each branching decision taken, as its trace line, before it takes effect. */
+    public void observe(Consumer<String> observer) {
+        this.observer = observer;
     }
 
     /**
@@ -159,7 +186,19 @@ public final class DecisionTape {
             return 0;
         }
         int choice;
-        if (pos >= steps.length) {
+        if (expected != null && pos < expected.size()) {
+            choice = -1;
+            for (int i = 0; i < labels.size() && choice < 0; i++) {
+                if (expected.get(pos).equals(who(player) + " " + kind + ": " + labels.get(i))) {
+                    choice = i;
+                }
+            }
+            if (choice < 0) {
+                throw new NondeterministicReplayException("Can't follow the line at decision " + pos + ": expected "
+                        + expected.get(pos) + ", options are " + labels);
+            }
+            pos++;
+        } else if (pos >= (expected != null ? expected.size() : steps.length)) {
             Signals.Branch branch = new Signals.Branch(player, kind, List.copyOf(labels), position.get(), turn, ordinal);
             if (handoff == null) {
                 throw new Signals.BranchReached(branch);
@@ -180,7 +219,11 @@ public final class DecisionTape {
             }
             pos++;
         }
-        trace.add(who(player) + " " + kind + ": " + labels.get(choice));
+        String line = who(player) + " " + kind + ": " + labels.get(choice);
+        trace.add(line);
+        if (observer != null) {
+            observer.accept(line);
+        }
         return choice;
     }
 

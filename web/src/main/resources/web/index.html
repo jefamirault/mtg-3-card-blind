@@ -184,6 +184,65 @@
   ol.line { margin: 0 0 .8rem; padding-left: 1.6rem; font-size: .9rem; color: var(--ink-soft); }
   ol.line li.end { list-style: none; color: var(--ink); font-weight: 600; margin-left: -1.6rem; }
 
+  /* --- animated replay: a dark table, deck b across the top, deck a at the bottom --- */
+  .watch { border: 0; background: none; padding: 0; color: var(--action); cursor: pointer; font: inherit; font-size: .9rem; text-decoration: underline; margin: 0 1.2rem .8rem 0; }
+  #board {
+    --bw: clamp(2.6rem, min(7.2vw, 10.5vh), 5.6rem); /* card width */
+    position: fixed; inset: 0; z-index: 25; display: grid; grid-template-rows: auto 1fr auto auto;
+    background: radial-gradient(ellipse at center, #26384A 0%, #17202B 75%); color: #E9EDF3; overflow: hidden;
+  }
+  #board[hidden] { display: none; }
+  .bd-top { display: flex; align-items: baseline; gap: .4rem 1.2rem; flex-wrap: wrap; padding: .7rem 1rem .4rem; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+  .bd-top h2 { margin: 0; font-size: 1.05rem; }
+  .bd-status { margin: 0; color: #B9C3D1; font-size: .9rem; }
+  .bd-close { margin-left: auto; border: 0; background: none; color: #E9EDF3; font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 .3rem; }
+  .bd-table { display: grid; grid-template-rows: auto 1fr auto; gap: .3rem; padding: .4rem 1rem; min-height: 0; overflow: auto; }
+  .bd-side { display: grid; grid-template-columns: 1fr auto; gap: .3rem 1rem; }
+  .bd-rows { display: grid; gap: .4rem; min-width: 0; }
+  .bd-row { display: flex; flex-wrap: wrap; gap: .45rem; min-height: calc(var(--bw) * 88 / 63); align-items: center; }
+  .bd-row .land.first { margin-left: auto; } /* lands at the far end of the battlefield row */
+  .bd-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: #8D99AA; }
+  .bd-info { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; grid-column: 1 / -1; }
+  .bd-name { font-weight: 700; }
+  .bd-side.active .bd-name { color: #FFD37A; }
+  .bd-life { font-weight: 700; font-size: 1.15rem; position: relative; }
+  .bd-meta { font-size: .8rem; color: #B9C3D1; }
+  .bd-delta { position: absolute; left: 100%; top: -.2rem; margin-left: .3rem; font-size: .9rem; animation: bd-float 1.4s ease-out forwards; }
+  .bd-delta.down { color: #FF8A80; } .bd-delta.up { color: #8FE3B0; }
+  @keyframes bd-float { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-1rem); } }
+  .bd-piles { display: grid; gap: .2rem .8rem; grid-template-columns: auto auto; align-content: center; }
+  .bd-pile { display: flex; min-height: calc(var(--bw) * .6 * 88 / 63); min-width: calc(var(--bw) * .6); padding-right: calc(var(--bw) * .35); }
+  .bd-pile .bcard { width: calc(var(--bw) * .6); margin-right: calc(var(--bw) * -.35); }
+  .bd-mid { display: flex; align-items: center; justify-content: center; gap: 1rem; min-height: 2rem; border-top: 1px dashed rgba(255, 255, 255, .1); border-bottom: 1px dashed rgba(255, 255, 255, .1); }
+  .bd-stack { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .bd-stack-item { display: flex; align-items: center; gap: .5rem; background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 210, 120, .5); border-radius: 4px; padding: .3rem .5rem .3rem .3rem; font-size: .8rem; max-width: 22rem; }
+  .bd-caption { margin: 0; padding: .45rem 1rem; min-height: 1.4em; font-size: 1.02rem; text-align: center; border-top: 1px solid rgba(255, 255, 255, .12); }
+  .bd-caption .bd-end { color: #FFD37A; font-weight: 700; }
+  .bd-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; padding: .4rem 1rem .8rem; }
+  .bd-controls button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); color: #E9EDF3; border-radius: 3px; min-width: 2.4rem; padding: .25rem .5rem; cursor: pointer; }
+  .bd-controls button:hover { background: rgba(255, 255, 255, .15); }
+  .bd-controls input[type=range] { flex: 1 1 12rem; accent-color: #FFD37A; }
+  .bd-controls label { font-size: .85rem; color: #B9C3D1; display: flex; align-items: center; gap: .35rem; }
+  .bd-controls select { font: inherit; font-size: .85rem; }
+  .bd-pos { font-size: .85rem; color: #B9C3D1; min-width: 4.5rem; }
+  .bcard { width: var(--bw); aspect-ratio: 63 / 88; flex: 0 0 auto; border: 0; padding: 0; background: none; cursor: zoom-in; position: relative; }
+  .bc-inner {
+    position: absolute; inset: 0; border-radius: calc(var(--bw) * .055); overflow: hidden; background: #F4F1E8; color: #17202B;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .5); font-size: .6rem; font-weight: 600; padding: .25rem; line-height: 1.1; text-align: left;
+  }
+  .bc-inner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .bcard.tapped { margin: 0 calc(var(--bw) * .2); }
+  .bcard.attacking .bc-inner { box-shadow: 0 0 0 3px #FF6B5E, 0 4px 14px rgba(0, 0, 0, .6); }
+  .bcard.blocking .bc-inner { box-shadow: 0 0 0 3px #7DB8FF, 0 4px 14px rgba(0, 0, 0, .6); }
+  .bc-badges { position: absolute; right: -.3rem; bottom: -.3rem; display: flex; flex-direction: column; align-items: flex-end; gap: .15rem; z-index: 1; }
+  .bc-badge { background: #17202B; color: #fff; border: 1px solid rgba(255, 255, 255, .5); border-radius: 3px; font-size: .68rem; font-weight: 700; padding: 0 .25rem; line-height: 1.35; white-space: nowrap; }
+  .bc-badge.dmg { background: #B03B3B; }
+  .bc-badge.counter { background: #2B4FBF; }
+  @media (max-width: 640px) {
+    .bd-side { grid-template-columns: 1fr; }
+    .bd-piles { grid-auto-flow: column; justify-content: start; }
+  }
+
   /* --- search tree browser --- */
   .tree { margin: 0 0 1rem; font-size: .9rem; }
   .tree-open, .tree-crumb, .tree-label[type=button] {
@@ -358,6 +417,26 @@
     <div id="results"></div>
   </section>
 </main>
+
+<div id="board" hidden role="dialog" aria-modal="true" aria-labelledby="board-title" tabindex="-1">
+  <div class="bd-top">
+    <h2 id="board-title"></h2>
+    <p class="bd-status"></p>
+    <button class="bd-close" type="button" aria-label="Close the replay" title="Close (Esc)">×</button>
+  </div>
+  <div class="bd-table"></div>
+  <p class="bd-caption" aria-live="polite"></p>
+  <div class="bd-controls">
+    <button type="button" class="bd-first" aria-label="First step" title="First step (Home)">|◀</button>
+    <button type="button" class="bd-prev" aria-label="Previous step" title="Previous step (←)">◀</button>
+    <button type="button" class="bd-play" aria-label="Play" title="Play / pause (space)">▶</button>
+    <button type="button" class="bd-next" aria-label="Next step" title="Next step (→)">▶|</button>
+    <input type="range" class="bd-scrub" min="0" max="0" value="0" aria-label="Step">
+    <span class="bd-pos"></span>
+    <label>Speed <select class="bd-speed"><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+    <label><input type="checkbox" class="bd-passes"> Show passes</label>
+  </div>
+</div>
 
 <div id="lightbox" hidden role="dialog" aria-modal="true" tabindex="-1">
   <div class="lbwrap">
@@ -805,7 +884,7 @@ async function showSaved() {
     : `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`;
   out.replaceChildren(
     el("p", { class: "shown-head" }, head, t.options ? el("br") : null, t.options ? `Search: ${describeOptions(t.options)}.` : null),
-    ...renderResults(t.results, t.options?.saveTrees ? id : null));
+    ...renderResults(t.results, t.options?.saveTrees ? id : null, id));
 }
 
 function render(status) {
@@ -896,6 +975,216 @@ function cellColor(points) {
   return `rgb(${rgb.join(",")})`;
 }
 
+// ---- animated replay: the server replays a saved game in Forge and sends the board at each
+// decision; cards keep their ids, so each one glides from where it was to where it is now.
+const board = $("#board");
+const bdTable = board.querySelector(".bd-table");
+const bdScrub = board.querySelector(".bd-scrub");
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let bd = null; // { g, frames, end, shown: [frame indexes], at: index into shown, timer, art: Map name -> url }
+let bdReturn = null;
+
+function watchButton(id, k, g) {
+  const b = el("button", { class: "watch", type: "button" }, "▶ Watch the game");
+  b.addEventListener("click", () => openReplay(id, k, g, b));
+  return b;
+}
+
+async function openReplay(id, k, g, button) {
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = "Replaying the game…";
+  const { ok, data } = await api("GET", `/api/history/${encodeURIComponent(id)}/games/${k}/replay`);
+  button.disabled = false;
+  button.textContent = label;
+  if (!ok) { alert(data.error || "Couldn't replay this game."); return; }
+  // card art first, so the cards don't pop in while they move
+  const names = new Set();
+  for (const f of data.frames) {
+    for (const p of f.players) for (const z of ["hand", "battlefield", "graveyard", "exile"]) for (const c of p[z]) names.add(c.name);
+    for (const s of f.stack) if (s.name) names.add(s.name);
+  }
+  prefetchCards([...names]);
+  const art = new Map();
+  await Promise.all([...names].map((n) => fetchCard(n).then((c) => {
+    const uris = c.image_uris || c.card_faces?.[0]?.image_uris;
+    if (uris) art.set(n, uris.normal || uris.small);
+  }).catch(() => {})));
+  bd = { g, frames: data.frames, end: data.end, art, timer: null, at: 0, shown: [], prev: null };
+  bdReturn = button;
+  board.querySelector("#board-title").textContent = `${g.a} vs ${g.b}, ${g.onThePlay} on the play`;
+  board.hidden = false;
+  document.body.style.overflow = "hidden";
+  board.focus();
+  pickFrames(0);
+  bdShow(0, false);
+}
+
+// Steps to show: every frame, or without the ones that only follow a pass (their changes show
+// up in the next step anyway). The first and last are always shown.
+function pickFrames(keepFrame) {
+  const all = board.querySelector(".bd-passes").checked;
+  bd.shown = bd.frames.map((f, i) => i).filter((i) => all || i === 0 || i === bd.frames.length - 1
+    || !/ priority: Pass$/.test(bd.frames[i].did || ""));
+  bdScrub.max = String(bd.shown.length - 1);
+  const at = bd.shown.findIndex((i) => i >= keepFrame);
+  bd.at = at < 0 ? bd.shown.length - 1 : at;
+}
+
+const sideName = (who) => who === "A" ? bd.g.a : who === "B" ? bd.g.b : "Chance";
+const bdNamed = (text) => text.replace(/-> ([AB])\b/g, (_, p) => "→ " + sideName(p)).replace(/\b([AB])'s turn\b/g, (_, p) => sideName(p) + "'s turn");
+
+// "A attack: Goblin Guide -> B" -> "goblin-guide attacks: Goblin Guide → swords"
+function describeAction(a) {
+  const m = /^(A|B|Chance) (.+?): (.*)$/.exec(a || "");
+  if (!m) return a || "";
+  const [, who, kind, label] = m;
+  if (who === "Chance") return "Chance: " + label;
+  const name = sideName(who);
+  const text = bdNamed(label);
+  if (kind === "priority") return `${name}: ${text}`;
+  if (kind === "attack") return text === "No attack" ? `${name} doesn't attack` : `${name} attacks: ${text}`;
+  if (kind === "block") return text === "No block" || text === "No blocks" ? `${name} doesn't block` : `${name} blocks: ${text}`;
+  return `${name} (${kind}): ${text}`;
+}
+
+// The transform of a card's face: turned sideways when tapped, pushed forward when attacking.
+const faceTransform = (c, me) => [c.attacking ? `translateY(${me ? "-" : ""}22%)` : "", c.tapped ? "rotate(90deg)" : ""].join(" ").trim() || "none";
+
+function bcard(c, me, id = c.id) {
+  const url = bd.art.get(c.name);
+  const badges = [];
+  if (c.power != null) badges.push(el("span", { class: "bc-badge" }, `${c.power}/${c.toughness}`));
+  if (c.damage) badges.push(el("span", { class: "bc-badge dmg" }, `${c.damage} dmg`));
+  for (const [k, n] of Object.entries(c.counters || {})) badges.push(el("span", { class: "bc-badge counter" }, `${n}× ${k}`));
+  const notes = [c.tapped && "tapped", c.attacking && "attacking", c.blocking && "blocking", c.sick && "summoning sick", c.token && "token"].filter(Boolean);
+  const card = el("button", {
+    type: "button", "data-id": String(id),
+    class: "bcard" + (c.tapped ? " tapped" : "") + (c.attacking ? " attacking" : "") + (c.blocking ? " blocking" : ""),
+    title: c.name + (notes.length ? ` (${notes.join(", ")})` : ""),
+  }, el("span", { class: "bc-inner", style: `transform:${faceTransform(c, me)}` }, c.name, url ? el("img", { src: url, alt: "" }) : null),
+  badges.length ? el("span", { class: "bc-badges" }, ...badges) : null);
+  card.dataset.face = faceTransform(c, me);
+  if (!c.token && c.name !== "Face-down card") card.addEventListener("click", () => openCard(c.name));
+  return card;
+}
+
+function bdSide(p, me, active, lifeBefore) {
+  const lands = p.battlefield.filter((c) => c.land), others = p.battlefield.filter((c) => !c.land);
+  const delta = lifeBefore == null ? 0 : p.life - lifeBefore;
+  const info = el("div", { class: "bd-info" },
+    el("span", { class: "bd-name" }, sideName(p.name) + (active ? " · their turn" : "")),
+    el("span", { class: "bd-life", title: "Life" }, `♥ ${p.life}`,
+      delta ? el("span", { class: "bd-delta " + (delta < 0 ? "down" : "up") }, (delta > 0 ? "+" : "−") + Math.abs(delta)) : null),
+    el("span", { class: "bd-meta" }, `library ${p.library}`));
+  const field = el("div", { class: "bd-row field", "aria-label": "Battlefield" }, ...others.map((c) => bcard(c, me)),
+    ...lands.map((c, i) => { const e = bcard(c, me); e.classList.add("land"); if (i === 0) e.classList.add("first"); return e; }));
+  const hand = el("div", { class: "bd-row hand", "aria-label": "Hand" }, ...p.hand.map((c) => bcard(c, me)));
+  const rows = me ? [field, hand] : [hand, field];
+  const pile = (name, cards) => [el("div", { class: "bd-label" }, `${name} ${cards.length}`),
+    el("div", { class: "bd-pile" }, ...cards.map((c) => bcard(c, me)))];
+  const side = el("section", { class: "bd-side " + (me ? "me" : "opp") + (active ? " active" : ""), "aria-label": sideName(p.name) },
+    el("div", { class: "bd-rows" }, ...rows),
+    // labels on top, piles below: Graveyard | Exile
+    el("div", { class: "bd-piles" }, ...[pile("Graveyard", p.graveyard), pile("Exile", p.exile)].flatMap((x) => x).sort((x, y) =>
+      Number(x.classList.contains("bd-pile")) - Number(y.classList.contains("bd-pile")))));
+  return me ? [side, info] : [info, side];
+}
+
+function bdShow(at, animate = true) {
+  bd.at = Math.max(0, Math.min(at, bd.shown.length - 1));
+  const i = bd.shown[bd.at];
+  const f = bd.frames[i];
+  const prev = bd.prev;
+  const duration = animate && !reducedMotion.matches ? 520 / bdSpeed() : 0;
+  // where each card was, to glide it to its new place (FLIP)
+  const before = new Map([...bdTable.querySelectorAll("[data-id]")].map((e) => [e.dataset.id, { rect: e.getBoundingClientRect(), face: e.dataset.face }]));
+
+  const [a, b] = f.players;
+  const onField = new Set(f.players.flatMap((p) => ["hand", "battlefield", "graveyard", "exile"].flatMap((z) => p[z].map((c) => String(c.id)))));
+  const stack = el("div", { class: "bd-stack", "aria-label": "Stack" }, ...[...f.stack].map((s) => el("div", { class: "bd-stack-item" },
+    // a spell on the stack is the card itself; an ability's source card stays where it is
+    bcard({ name: s.name, id: s.id }, true, s.id != null && !onField.has(String(s.id)) ? s.id : "ability-" + s.id),
+    el("span", {}, bdNamed(s.text || s.name)))));
+  bdTable.replaceChildren(
+    el("div", {}, ...bdSide(b, false, f.active === "B", prev && prev.players[1].life)),
+    el("div", { class: "bd-mid" }, f.stack.length ? el("span", { class: "bd-label" }, "Stack") : null, stack),
+    el("div", {}, ...bdSide(a, true, f.active === "A", prev && prev.players[0].life)));
+  bd.prev = f;
+
+  if (duration) {
+    for (const e of bdTable.querySelectorAll("[data-id]")) {
+      const old = before.get(e.dataset.id);
+      const now = e.getBoundingClientRect();
+      const face = e.querySelector(".bc-inner");
+      if (!old) {
+        e.animate([{ opacity: 0, transform: "scale(.85)" }, { opacity: 1, transform: "none" }], { duration, easing: "ease-out" });
+        continue;
+      }
+      const dx = old.rect.left - now.left, dy = old.rect.top - now.top;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        e.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration, easing: "cubic-bezier(.2, .7, .2, 1)" });
+      }
+      if (old.face !== e.dataset.face) face.animate([{ transform: old.face }, { transform: e.dataset.face }], { duration, easing: "ease-in-out" });
+    }
+  }
+
+  const player = f.active ? sideName(f.active) : "";
+  board.querySelector(".bd-status").textContent = `Turn ${f.turn}${player ? ` · ${player}'s turn` : ""}${f.phase ? ` · ${f.phase}` : ""}`;
+  const last = bd.at === bd.shown.length - 1;
+  board.querySelector(".bd-caption").replaceChildren(...[
+    i === 0 ? "Start of the game" + (f.next ? `. Next: ${describeAction(f.next)}` : "") : describeAction(f.did),
+    last && bd.end ? el("span", {}, " · ", el("span", { class: "bd-end" }, bdNamed(bd.end).replace(/^([AB]) /, (_, p) => sideName(p) + " "))) : null,
+  ].filter(Boolean));
+  bdScrub.value = String(bd.at);
+  board.querySelector(".bd-pos").textContent = `${bd.at + 1} / ${bd.shown.length}`;
+  if (last) bdPause();
+}
+
+const bdSpeed = () => Number(board.querySelector(".bd-speed").value);
+function bdPlay() {
+  if (bd.at >= bd.shown.length - 1) bdShow(0, false);
+  const tick = () => {
+    if (bd.at >= bd.shown.length - 1) { bdPause(); return; }
+    bdShow(bd.at + 1);
+    bd.timer = setTimeout(tick, 1300 / bdSpeed());
+  };
+  board.querySelector(".bd-play").textContent = "⏸";
+  board.querySelector(".bd-play").setAttribute("aria-label", "Pause");
+  bd.timer = setTimeout(tick, 400 / bdSpeed());
+}
+function bdPause() {
+  if (!bd) return;
+  clearTimeout(bd.timer);
+  bd.timer = null;
+  board.querySelector(".bd-play").textContent = "▶";
+  board.querySelector(".bd-play").setAttribute("aria-label", "Play");
+}
+const bdToggle = () => bd.timer ? bdPause() : bdPlay();
+function closeReplay() {
+  if (board.hidden) return;
+  bdPause();
+  board.hidden = true;
+  document.body.style.overflow = "";
+  bd = null;
+  bdReturn?.focus();
+}
+
+board.querySelector(".bd-close").addEventListener("click", closeReplay);
+board.querySelector(".bd-first").addEventListener("click", () => { bdPause(); bdShow(0); });
+board.querySelector(".bd-prev").addEventListener("click", () => { bdPause(); bdShow(bd.at - 1); });
+board.querySelector(".bd-next").addEventListener("click", () => { bdPause(); bdShow(bd.at + 1); });
+board.querySelector(".bd-play").addEventListener("click", bdToggle);
+bdScrub.addEventListener("input", () => { bdPause(); bdShow(Number(bdScrub.value), false); });
+board.querySelector(".bd-passes").addEventListener("change", () => { pickFrames(bd.shown[bd.at]); bdShow(bd.at, false); });
+// Captured first, so the card view (opened from the board) gets Escape and the arrows while it's up.
+document.addEventListener("keydown", (e) => {
+  if (board.hidden || !lightbox.hidden || e.target.closest?.("select, input[type=range]")) return;
+  const keys = { Escape: closeReplay, ArrowLeft: () => { bdPause(); bdShow(bd.at - 1); }, ArrowRight: () => { bdPause(); bdShow(bd.at + 1); },
+    " ": bdToggle, Home: () => { bdPause(); bdShow(0); }, End: () => { bdPause(); bdShow(bd.shown.length - 1); } };
+  if (keys[e.key]) { e.preventDefault(); e.stopPropagation(); keys[e.key](); }
+}, true);
+
 // ---- search tree browser: one decision at a time, with the path from the start of the game
 // above it. Values are what the search proved, from deck a's point of view (see SearchTree).
 function treeBrowser(id, k, g) {
@@ -981,8 +1270,9 @@ function showTree(box, data, g) {
   render();
 }
 
+// replayId: the saved tournament the games belong to, for animated replays
 // treesId: the saved tournament whose games have search trees to browse; null if none
-function renderResults(r, treesId = null) {
+function renderResults(r, treesId = null, replayId = null) {
   const names = r.entries.map((e) => e.name);
   const standings = el("ol", { class: "standings" }, ...r.standings.map((s, i) =>
     el("li", {},
@@ -1018,6 +1308,7 @@ function renderResults(r, treesId = null) {
         g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`),
         g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
       el("ol", { class: "line" }, ...steps),
+      replayId ? watchButton(replayId, k, g) : null,
       treesId ? treeBrowser(treesId, k, g) : null);
   });
 

@@ -101,6 +101,12 @@ budget it has used. Expanding a game shows the line its search is on: each decis
 of the game, the option being tried there and how many of its options have been tried (the first
 30 decisions; the deeper ones change too fast to follow).
 
+*Watch the game* (in each finished game) replays its optimal line on an animated board: both
+players' hands, battlefields, graveyards and exile, the stack, life totals, and the turn and phase,
+with play/pause, stepping (arrow keys) and a scrubber. The server replays the saved line in Forge
+and snapshots the board at each decision (`GameReplay`), so tournaments saved earlier can be watched
+too. Steps that are only a pass are skipped unless *Show passes* is ticked.
+
 *Save search trees* (in *Search settings*, off by default, up to 8 entries) keeps each game's
 searched tree, so a finished game can be browsed one decision at a time: every option, what the
 search proved about it and which was best. Values are what alpha-beta proved, so many are bounds

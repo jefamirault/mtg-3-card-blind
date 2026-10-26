@@ -37,6 +37,8 @@ import forge.model.FModel;
 import tcb.deck.DeckList;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
+import tcb.engine.NondeterministicReplayException;
+import tcb.solve.GameReplay;
 import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Solver;
@@ -173,6 +175,9 @@ public final class WebServer {
                 stopTournament(ex);
             } else if (path.equals("/api/history") && method.equals("GET")) {
                 sendJson(ex, 200, listHistory());
+            } else if (path.matches("/api/history/[^/]+/games/[0-9]+/replay") && method.equals("GET")) {
+                String[] parts = path.split("/");
+                replayGame(ex, parts[3], Integer.parseInt(parts[5]));
             } else if (path.matches("/api/history/[^/]+/trees/[0-9]+") && method.equals("GET")) {
                 String[] parts = path.split("/");
                 getTree(ex, parts[3], Integer.parseInt(parts[5]));
@@ -568,6 +573,54 @@ public final class WebServer {
             Files.delete(treesDir(id));
         }
         sendJson(ex, 200, Map.of("removed", id));
+    }
+
+    /**
+     * The board at every step of a saved game's optimal line, for the animated replay: the game
+     * is replayed in Forge along the saved line (see GameReplay).
+     */
+    private void replayGame(HttpExchange ex, String id, int game) throws IOException {
+        if (!validId(id) || !Files.exists(historyFile(id))) {
+            sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
+            return;
+        }
+        JsonObject saved = GSON.fromJson(Files.readString(historyFile(id)), JsonObject.class);
+        JsonObject results = saved.getAsJsonObject("results");
+        if (game >= results.getAsJsonArray("games").size()) {
+            sendJson(ex, 404, Map.of("error", "No game " + game + " in that tournament."));
+            return;
+        }
+        JsonObject g = results.getAsJsonArray("games").get(game).getAsJsonObject();
+        DeckList a = savedDeck(results, g.get("a").getAsString());
+        DeckList b = savedDeck(results, g.get("b").getAsString());
+        int startingPlayer = g.get("onThePlay").getAsString().equals(a.name()) ? 0 : 1;
+        List<String> line = new ArrayList<>();
+        g.getAsJsonArray("line").forEach(l -> line.add(l.getAsString()));
+        // Older saves have maxTurns (Forge turns); newer ones turns (turn cycles).
+        JsonObject o = saved.has("options") ? saved.getAsJsonObject("options") : new JsonObject();
+        int turnLimit = o.has("turns") ? Turns.forgeTurns(o.get("turns").getAsInt())
+                : o.has("maxTurns") ? o.get("maxTurns").getAsInt() : DEFAULTS.maxTurns();
+        try {
+            sendJson(ex, 200, GameReplay.replay(a, b, startingPlayer, line, turnLimit));
+        } catch (RuntimeException e) {
+            if (!NondeterministicReplayException.causedBy(e)) {
+                throw e;
+            }
+            sendJson(ex, 409, Map.of("error", "This game can't be replayed: the engine no longer plays its saved line"
+                    + " the same way (the solver has changed since it was saved). " + e.getMessage()));
+        }
+    }
+
+    private static DeckList savedDeck(JsonObject results, String name) {
+        for (var e : results.getAsJsonArray("entries")) {
+            JsonObject entry = e.getAsJsonObject();
+            if (entry.get("name").getAsString().equals(name)) {
+                List<String> cards = new ArrayList<>();
+                entry.getAsJsonArray("cards").forEach(c -> cards.add(c.getAsString()));
+                return new DeckList(name, cards);
+            }
+        }
+        throw new IllegalStateException("saved tournament has no entry called " + name);
     }
 
     /** One game's saved search tree, sent as stored: gzipped JSON (see SearchTree#toGzipJson). */

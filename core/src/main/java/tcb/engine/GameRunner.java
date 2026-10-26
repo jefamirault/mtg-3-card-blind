@@ -2,6 +2,8 @@ package tcb.engine;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 
 import forge.LobbyPlayer;
 import forge.ai.AiCache;
@@ -107,8 +109,35 @@ public final class GameRunner {
         return handoff.fromGame();
     }
 
+    /**
+     * A replayed game with the board along the way: {@code boards.get(i)} is the board when
+     * {@code actions.get(i)} was decided (before it took effect), and the last board is where
+     * the game stopped, so there is one more board than actions.
+     */
+    public record Watched(List<String> actions, List<Map<String, Object>> boards, Outcome outcome) {
+    }
+
+    /** Replays {@code tape} (usually {@link DecisionTape#following}) on the calling thread, recording the board. */
+    public Watched watch(DecisionTape tape) {
+        List<String> actions = new ArrayList<>();
+        List<Map<String, Object>> boards = new ArrayList<>();
+        Game[] game = new Game[1];
+        tape.observe(action -> {
+            actions.add(action);
+            boards.add(BoardSnapshot.of(game[0]));
+        });
+        Outcome outcome = run(tape, g -> game[0] = g);
+        boards.add(BoardSnapshot.of(game[0]));
+        return new Watched(actions, boards, outcome);
+    }
+
     /** Plays the game on the calling thread, replaying {@code tape}, until it ends or reaches a new decision. */
     public Outcome run(DecisionTape tape) {
+        return run(tape, null);
+    }
+
+    /** @param created told the game once it's set up, before it starts; may be null */
+    private Outcome run(DecisionTape tape, Consumer<Game> created) {
         resetIds();
         AiCache.clear();
         ChanceRandom random = new ChanceRandom(tape, SEED);
@@ -124,6 +153,9 @@ public final class GameRunner {
         Match match = new Match(rules, players, "3 Card Blind");
         Game game = match.createGame();
         game.setNoGUIUser();
+        if (created != null) {
+            created.accept(game);
+        }
         random.attach(game);
 
         try {
