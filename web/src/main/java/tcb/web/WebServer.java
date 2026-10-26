@@ -41,6 +41,7 @@ import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Solver;
 import tcb.solve.Tournament;
+import tcb.solve.Turns;
 
 /**
  * Web front end: submit entries, run the tournament, browse results.
@@ -57,7 +58,9 @@ public final class WebServer {
     private static final Solver.Options DEFAULTS = Solver.Options.defaults();
     private static final int MAX_TIME_SECONDS = 24 * 60 * 60;
     private static final long MIN_NODES = 1_000, MAX_NODES = 1_000_000_000;
-    private static final int MAX_TURNS = 200;
+    private static final int MAX_TURNS = 100; // turn cycles
+    /** Most entries a tournament that saves search trees can have (8 entries: 56 games). */
+    private static final int MAX_TREE_ENTRIES = 8;
     private static final DateTimeFormatter ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path entriesDir;
@@ -73,6 +76,7 @@ public final class WebServer {
     private final Set<Tournament.Running> running = ConcurrentHashMap.newKeySet();
     private Tournament.Stop stop = new Tournament.Stop();
     private Solver.Options options = DEFAULTS;
+    private boolean saveTrees;
     private List<DeckList> tournamentEntries = List.of();
     private int totalGames;
     private Map<String, Object> results;
@@ -169,6 +173,9 @@ public final class WebServer {
                 stopTournament(ex);
             } else if (path.equals("/api/history") && method.equals("GET")) {
                 sendJson(ex, 200, listHistory());
+            } else if (path.matches("/api/history/[^/]+/trees/[0-9]+") && method.equals("GET")) {
+                String[] parts = path.split("/");
+                getTree(ex, parts[3], Integer.parseInt(parts[5]));
             } else if (path.startsWith("/api/history/") && method.equals("GET")) {
                 getHistory(ex, path.substring("/api/history/".length()));
             } else if (path.startsWith("/api/history/") && method.equals("DELETE")) {
@@ -279,21 +286,31 @@ public final class WebServer {
         m.put("progress", progress);
         m.put("running", runningGames());
         m.put("totalGames", totalGames);
-        m.put("options", optionsJson(options));
-        m.put("defaults", optionsJson(DEFAULTS));
+        m.put("options", optionsJson(options, saveTrees));
+        m.put("defaults", optionsJson(DEFAULTS, false));
         m.put("results", results);
         m.put("error", error);
         return m;
     }
 
     /** The search settings the page can change, in the form it sends them back. */
-    private static Map<String, Object> optionsJson(Solver.Options o) {
+    private static Map<String, Object> optionsJson(Solver.Options o, boolean trees) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("timeSeconds", o.timeBudget().toSeconds());
         m.put("nodes", o.nodeBudget());
-        m.put("maxTurns", o.maxTurns());
+        m.put("turns", o.maxTurns() / 2); // turn cycles; the solver counts each player's turn
         m.put("exactTurns", o.exactTurns());
+        m.put("saveTrees", trees);
         return m;
+    }
+
+    /** The body's {@code options.saveTrees}: record every game's search tree. */
+    private static boolean parseSaveTrees(JsonObject body) {
+        if (body == null || !body.has("options") || !body.get("options").isJsonObject()) {
+            return false;
+        }
+        JsonObject o = body.getAsJsonObject("options");
+        return o.has("saveTrees") && o.get("saveTrees").isJsonPrimitive() && o.get("saveTrees").getAsBoolean();
     }
 
     /**
@@ -307,7 +324,7 @@ public final class WebServer {
         JsonObject o = body.getAsJsonObject("options");
         long time = DEFAULTS.timeBudget().toSeconds();
         long nodes = DEFAULTS.nodeBudget();
-        int maxTurns = DEFAULTS.maxTurns();
+        int turns = DEFAULTS.maxTurns() / 2;
         boolean exactTurns = DEFAULTS.exactTurns();
         try {
             if (o.has("timeSeconds")) {
@@ -316,8 +333,8 @@ public final class WebServer {
             if (o.has("nodes")) {
                 nodes = o.get("nodes").getAsLong();
             }
-            if (o.has("maxTurns")) {
-                maxTurns = o.get("maxTurns").getAsInt();
+            if (o.has("turns")) {
+                turns = o.get("turns").getAsInt();
             }
             if (o.has("exactTurns")) {
                 exactTurns = o.get("exactTurns").getAsBoolean();
@@ -332,10 +349,11 @@ public final class WebServer {
         if (nodes < MIN_NODES || nodes > MAX_NODES) {
             problems.add(String.format("Node budget must be between %,d and %,d.", MIN_NODES, MAX_NODES));
         }
-        if (maxTurns < 1 || maxTurns > MAX_TURNS) {
+        if (turns < 1 || turns > MAX_TURNS) {
             problems.add("Turn limit must be between 1 and " + MAX_TURNS + ".");
         }
-        return new Solver.Options(maxTurns, maxTurns, nodes, Duration.ofSeconds(time), exactTurns);
+        int limit = Turns.forgeTurns(turns);
+        return new Solver.Options(limit, limit, nodes, Duration.ofSeconds(time), exactTurns);
     }
 
     /** Live statistics of the games being solved, longest-running first. */
@@ -350,8 +368,8 @@ public final class WebServer {
             m.put("onThePlay", entries.get(r.startingPlayer() == 0 ? r.a() : r.b()).name());
             m.put("nodes", p.nodes());
             m.put("seconds", p.elapsed().toMillis() / 1000.0);
-            m.put("turnLimit", p.turnLimit());
-            m.put("maxTurns", options.maxTurns());
+            m.put("turnLimit", p.turnLimit() / 2);
+            m.put("maxTurns", options.maxTurns() / 2);
             m.put("pass", p.pass());
             m.put("budgetUsed", p.budgetUsed());
             m.put("timeBudgetSeconds", options.timeBudget().toSeconds());
@@ -402,6 +420,11 @@ public final class WebServer {
             problems.add("Choose at least two entries to run a tournament.");
         }
         Solver.Options chosenOptions = parseOptions(body, problems);
+        boolean trees = parseSaveTrees(body);
+        if (trees && entries.size() > MAX_TREE_ENTRIES) {
+            problems.add("Saving search trees is for small tournaments: choose at most " + MAX_TREE_ENTRIES
+                    + " entries, or untick it in the search settings.");
+        }
         if (!problems.isEmpty()) {
             sendJson(ex, 400, Map.of("problems", problems));
             return;
@@ -417,6 +440,7 @@ public final class WebServer {
             running.clear();
             tournamentEntries = field;
             options = chosenOptions;
+            saveTrees = trees;
             stop = new Tournament.Stop();
             totalGames = field.size() * (field.size() - 1);
             results = null;
@@ -426,12 +450,12 @@ public final class WebServer {
         Thread runner = new Thread(() -> {
             try {
                 long start = System.nanoTime();
-                Tournament.Results r = Tournament.run(field, chosenOptions, threads, progress::add, running, thisStop, cache);
+                Tournament.Results r = Tournament.run(field, chosenOptions, threads, progress::add, running, thisStop, cache, trees);
                 Map<String, Object> json = ResultsJson.toJson(r);
                 boolean stopped = !r.notPlayed().isEmpty();
                 // A tournament stopped before any game finished has nothing worth keeping.
                 if (!r.games().isEmpty()) {
-                    save(json, chosenOptions, Duration.ofNanos(System.nanoTime() - start));
+                    save(json, r, chosenOptions, trees, Duration.ofNanos(System.nanoTime() - start));
                 }
                 synchronized (this) {
                     results = json;
@@ -467,18 +491,32 @@ public final class WebServer {
 
     // ---- saved tournaments
 
-    /** Writes a finished tournament to the history directory, named by when it finished. */
-    private synchronized void save(Map<String, Object> results, Solver.Options options, Duration elapsed) throws IOException {
+    /**
+     * Writes a finished tournament to the history directory, named by when it finished. Search
+     * trees, if saved, go in a folder beside it: {@code <id>.trees/<k>.json.gz} for the k-th game
+     * of {@code results.games}.
+     */
+    private synchronized void save(Map<String, Object> results, Tournament.Results r, Solver.Options options,
+                                   boolean trees, Duration elapsed) throws IOException {
         String base = LocalDateTime.now().format(ID_FORMAT);
         String id = base;
         for (int n = 2; Files.exists(historyFile(id)); n++) {
             id = base + "-" + n;
         }
+        if (trees) {
+            Files.createDirectories(treesDir(id));
+            for (int k = 0; k < r.games().size(); k++) {
+                byte[] tree = r.games().get(k).tree();
+                if (tree != null) {
+                    Files.write(treeFile(id, k), tree);
+                }
+            }
+        }
         Map<String, Object> saved = new LinkedHashMap<>();
         saved.put("id", id);
         saved.put("finished", LocalDateTime.now().withNano(0).toString());
         saved.put("seconds", elapsed.toMillis() / 1000.0);
-        saved.put("options", optionsJson(options));
+        saved.put("options", optionsJson(options, trees));
         saved.put("results", results);
         Files.writeString(historyFile(id), GSON.toJson(saved));
     }
@@ -521,7 +559,30 @@ public final class WebServer {
             sendJson(ex, 404, Map.of("error", "No saved tournament " + id));
             return;
         }
+        if (Files.isDirectory(treesDir(id))) {
+            try (Stream<Path> files = Files.list(treesDir(id))) {
+                for (Path f : files.toList()) {
+                    Files.delete(f);
+                }
+            }
+            Files.delete(treesDir(id));
+        }
         sendJson(ex, 200, Map.of("removed", id));
+    }
+
+    /** One game's saved search tree, sent as stored: gzipped JSON (see SearchTree#toGzipJson). */
+    private void getTree(HttpExchange ex, String id, int game) throws IOException {
+        if (!validId(id) || !Files.exists(treeFile(id, game))) {
+            sendJson(ex, 404, Map.of("error", "No search tree saved for that game."));
+            return;
+        }
+        byte[] bytes = Files.readAllBytes(treeFile(id, game));
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        ex.getResponseHeaders().set("Content-Encoding", "gzip");
+        ex.sendResponseHeaders(200, bytes.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(bytes);
+        }
     }
 
     private static boolean validId(String id) {
@@ -530,6 +591,14 @@ public final class WebServer {
 
     private Path historyFile(String id) {
         return historyDir.resolve(id + ".json");
+    }
+
+    private Path treesDir(String id) {
+        return historyDir.resolve(id + ".trees");
+    }
+
+    private Path treeFile(String id, int game) {
+        return treesDir(id).resolve(game + ".json.gz");
     }
 
     private static Map<String, String> query(HttpExchange ex) {

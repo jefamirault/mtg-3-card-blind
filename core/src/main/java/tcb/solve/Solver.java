@@ -60,12 +60,18 @@ public final class Solver {
      * @param pWin              probability deck A wins under optimal play
      * @param pDraw             probability of a draw
      * @param pLoss             probability deck B wins
-     * @param provenTurnLimit   largest turn limit fully searched (0 if not even the first finished)
+     * @param provenTurnLimit   largest turn limit fully searched, in Forge turns (0 if not even the
+     *                          first finished); {@link #provenTurns()} in turn cycles
      * @param complete          true if the result is final: decisive, or searched up to maxTurns
      * @param principalVariation the optimal line found, as readable decisions
      */
     public record GameResult(double pWin, double pDraw, double pLoss, int provenTurnLimit, boolean complete,
                              List<String> principalVariation, long nodes, Duration elapsed) {
+        /** {@link #provenTurnLimit()} in turn cycles, as shown to people. */
+        public int provenTurns() {
+            return provenTurnLimit / 2;
+        }
+
         /** P(A wins) - P(B wins). */
         public double value() {
             return pWin - pLoss;
@@ -114,7 +120,7 @@ public final class Solver {
      *
      * @param nodes      search nodes so far
      * @param elapsed    time since the search started
-     * @param turnLimit  turn limit of the current pass (iterative deepening doubles it)
+     * @param turnLimit  turn limit of the current pass in Forge turns (iterative deepening doubles it)
      * @param pass       what the current pass is trying to prove
      * @param budgetUsed fraction of the node or time budget used, whichever is larger (0 to 1)
      * @param line       the decisions on the line being searched right now, from the first one;
@@ -130,7 +136,7 @@ public final class Solver {
      *
      * @param player  0 for deck A, 1 for deck B, {@link DecisionTape#CHANCE} for a random event
      * @param kind    decision type, e.g. "priority", "attack"
-     * @param turn    turn the decision is made in
+     * @param turn    turn cycle the decision is made in (see {@link Turns})
      * @param choice  the option being searched
      * @param tried   how many options have been tried here, counting this one
      * @param options how many options there are
@@ -142,6 +148,7 @@ public final class Solver {
     public static final int MAX_LINE = 30;
 
     private final GameRunner runner;
+    private final int startingPlayer;
     private final Options options;
     private final Map<String, Entry> table = new HashMap<>();
     /**
@@ -166,6 +173,10 @@ public final class Solver {
      * searched is cheap next to replaying the game.
      */
     private final List<Frame> line = new ArrayList<>();
+    /** The searched tree, when {@link #recordTree()} asked for it; null otherwise. */
+    private SearchTree tree;
+    /** The tree node of the position the last {@link #search} call returned from, for its parent to attach. */
+    private SearchTree.Node lastNode;
 
     private static final class Frame {
         final Branch branch;
@@ -179,6 +190,7 @@ public final class Solver {
 
     public Solver(DeckList a, DeckList b, int startingPlayer, Options options) {
         this.runner = new GameRunner(a, b, startingPlayer, options.exhaustive());
+        this.startingPlayer = startingPlayer;
         this.options = options;
     }
 
@@ -194,7 +206,8 @@ public final class Solver {
             depth = line.size();
             for (Frame f : line.subList(0, Math.min(depth, MAX_LINE))) {
                 Branch b = f.branch;
-                decisions.add(new Decision(b.player(), b.kind(), b.turn(), b.labels().get(f.choice), f.tried, b.labels().size()));
+                decisions.add(new Decision(b.player(), b.kind(), Turns.cycle(b.turn()), b.labels().get(f.choice), f.tried,
+                        b.labels().size()));
             }
         }
         return new Progress(n, Duration.ofNanos(elapsed), turnLimit, pass, Math.min(1, used), decisions, depth);
@@ -234,6 +247,19 @@ public final class Solver {
         return cancelled;
     }
 
+    /** Makes {@link #solve()} record the tree it searches; call before solving. */
+    public void recordTree() {
+        tree = new SearchTree();
+    }
+
+    /**
+     * The tree the last finished turn limit searched, if {@link #recordTree()} was called and one
+     * finished; null otherwise.
+     */
+    public SearchTree tree() {
+        return tree == null || tree.isEmpty() ? null : tree;
+    }
+
     public GameResult solve() {
         long start = System.nanoTime();
         startNanos = start;
@@ -250,6 +276,9 @@ public final class Solver {
             }
             best = line;
             bestLimit = limit;
+            if (tree != null) {
+                tree.keep(limit);
+            }
             // A forced win/loss within a limit stays forced with more turns; otherwise go deeper.
             complete = Math.abs(line.value()) > 1 - 1e-9 || limit >= options.maxTurns();
             if (complete) {
@@ -278,14 +307,12 @@ public final class Solver {
         path.clear();
         sawChance = false;
         turnLimit = limit;
-        pass = "can A force a win?";
-        Line aWins = search(new Step[0], limit, 0, 1, null);
+        Line aWins = rootPass("can A force a win?", limit, 0, 1, true);
         if (!sawChance) {
             if (aWins.value() >= 1) {
                 return aWins;
             }
-            pass = "can B force a win?";
-            Line bWins = search(new Step[0], limit, -1, 0, null);
+            Line bWins = rootPass("can B force a win?", limit, -1, 0, false);
             if (bWins.value() <= -1) {
                 return bWins;
             }
@@ -293,8 +320,20 @@ public final class Solver {
             return new Line(0, 0, 1, 0, aWins.pv());
         }
         table.clear();
-        pass = "expected result (random events)";
-        return search(new Step[0], limit, -1, 1, null);
+        return rootPass("expected result (random events)", limit, -1, 1, false);
+    }
+
+    /** One search from the start of the game, recorded as a pass of the tree if there is one. */
+    private Line rootPass(String name, int limit, double alpha, double beta, boolean firstOfLimit) {
+        pass = name;
+        if (tree != null) {
+            tree.startPass(firstOfLimit);
+        }
+        Line result = search(new Step[0], limit, alpha, beta, null);
+        if (tree != null) {
+            tree.endPass(name, lastNode);
+        }
+        return result;
     }
 
     /**
@@ -312,7 +351,11 @@ public final class Solver {
             if (outcome == null) {
                 outcome = runner.start(new DecisionTape(steps, limit));
             }
+            lastNode = null;
             if (outcome.isTerminal()) {
+                if (tree != null) {
+                    lastNode = tree.end(ending(outcome, limit));
+                }
                 return Line.of(outcome.value());
             }
             Branch branch = outcome.branch();
@@ -324,6 +367,9 @@ public final class Solver {
             if (position != null && !path.add(position)) {
                 // The same position recurs on this line: the players can loop forever, which is a draw.
                 // (Standard first-repetition rule; a player who can force a win can do so without looping.)
+                if (tree != null) {
+                    lastNode = tree.end("draw (position repeats)");
+                }
                 return Line.of(0);
             }
             try {
@@ -356,11 +402,13 @@ public final class Solver {
         int n = branch.labels().size();
         double value = 0, pWin = 0, pDraw = 0, pLoss = 0;
         int[] pv = null;
+        SearchTree.Node recorded = tree == null ? null : tree.decision(branch);
         Frame frame = enter(branch);
         try {
             for (int i = 0; i < n; i++) {
                 exploring(frame, i);
                 Line child = search(append(steps, branch.step(i)), limit, -1, 1, resume(node, i));
+                record(recorded, i, child.value(), -1, 1);
                 value += child.value() / n;
                 pWin += child.pWin() / n;
                 pDraw += child.pDraw() / n;
@@ -372,6 +420,7 @@ public final class Solver {
         } finally {
             leave();
         }
+        lastNode = recorded;
         return new Line(value, pWin, pDraw, pLoss, pv);
     }
 
@@ -388,6 +437,9 @@ public final class Solver {
                 if (e.bound() == Bound.EXACT
                         || (e.bound() == Bound.LOWER && v >= beta)
                         || (e.bound() == Bound.UPPER && v <= alpha)) {
+                    if (tree != null) {
+                        lastNode = tree.seen();
+                    }
                     return e.line().withPv(new int[] {e.best()});
                 }
                 firstTry = e.best();
@@ -399,12 +451,14 @@ public final class Solver {
         boolean maximizing = branch.player() == 0;
         Line best = null;
         int bestIndex = -1;
+        SearchTree.Node recorded = tree == null ? null : tree.decision(branch);
         Frame frame = enter(branch);
         try {
             for (int i : moveOrder(branch.labels().size(), firstTry)) {
                 exploring(frame, i);
                 Line child = search(append(steps, branch.step(i)), limit, alpha, beta, resume(node, i));
                 double v = child.value();
+                record(recorded, i, v, alpha, beta);
                 if (best == null || (maximizing ? v > best.value() : v < best.value())) {
                     best = child.withPv(prepend(i, child.pv()));
                     bestIndex = i;
@@ -427,7 +481,24 @@ public final class Solver {
             table.put(key, new Entry(best, bound, bestIndex));
             bestMoves.put(key, bestIndex);
         }
+        if (recorded != null) {
+            recorded.best = bestIndex;
+        }
+        lastNode = recorded;
         return best;
+    }
+
+    /**
+     * Adds option {@code i}, just searched with window (alpha, beta), to a recorded decision. Values
+     * outside the window are bounds, except a win or loss: those are as good or bad as it gets.
+     */
+    private void record(SearchTree.Node decision, int i, double v, double alpha, double beta) {
+        if (decision == null) {
+            return;
+        }
+        boolean decisive = Math.abs(v) > 1 - 1e-9;
+        char bound = decisive ? '=' : v <= alpha ? '<' : v >= beta ? '>' : '=';
+        decision.children.add(new SearchTree.Child(i, v, bound, lastNode));
     }
 
     /**
@@ -473,15 +544,22 @@ public final class Solver {
         }
         List<String> trace = new ArrayList<>(outcome.trace());
         if (outcome.isTerminal()) {
-            trace.add("=> " + switch (outcome.result()) {
-                case A_WINS -> "A wins on turn " + outcome.turn();
-                case B_WINS -> "B wins on turn " + outcome.turn();
-                case DRAW -> outcome.turn() > limit ? "draw (turn limit " + limit + ")" : "draw (position repeats)";
-            });
+            trace.add("=> " + ending(outcome, limit));
         } else {
             trace.add("...");
         }
         return trace;
+    }
+
+    /** How a finished game ended, e.g. "A wins on turn 4 (B's turn)", counting turn cycles. */
+    private String ending(Outcome outcome, int limit) {
+        String when = " on turn " + Turns.cycle(outcome.turn())
+                + " (" + (Turns.activePlayer(outcome.turn(), startingPlayer) == 0 ? "A" : "B") + "'s turn)";
+        return switch (outcome.result()) {
+            case A_WINS -> "A wins" + when;
+            case B_WINS -> "B wins" + when;
+            case DRAW -> outcome.turn() > limit ? "draw (turn limit " + limit / 2 + ")" : "draw (position repeats)";
+        };
     }
 
     private String key(Branch branch) {

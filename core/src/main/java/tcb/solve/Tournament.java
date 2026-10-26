@@ -33,8 +33,10 @@ public final class Tournament {
      * One solved game; {@code result.value()} is from deck {@code a}'s point of view.
      *
      * @param cached true if the result came from the {@link ResultCache} instead of a search
+     * @param tree   the searched tree as {@link SearchTree#toGzipJson() gzipped JSON}, if the
+     *               tournament saved trees and the search finished a turn limit; null otherwise
      */
-    public record Game(int a, int b, int startingPlayer, GameResult result, boolean cached) {
+    public record Game(int a, int b, int startingPlayer, GameResult result, boolean cached, byte[] tree) {
         /** Expected points for {@code entry} (which must be a or b). */
         public double pointsFor(int entry) {
             return WIN_POINTS * winChance(entry) + DRAW_POINTS * result.pDraw();
@@ -125,15 +127,22 @@ public final class Tournament {
         return run(entries, options, threads, progress, ConcurrentHashMap.newKeySet(), new Stop(), null);
     }
 
+    public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress,
+                              Collection<Running> running, Stop stop, ResultCache cache) {
+        return run(entries, options, threads, progress, running, stop, cache, false);
+    }
+
     /**
      * @param progress one line per finished game
      * @param running  games currently being solved: each is added when its search starts and
      *                 removed after its line has gone to {@code progress}. Must be thread-safe.
      * @param stop     to stop the tournament early from another thread
      * @param cache    solved games to reuse, and where to save new ones; null to solve every game
+     * @param trees    record each game's search tree ({@link Game#tree()}). Every game is then
+     *                 solved, even ones in the cache, which has no trees.
      */
     public static Results run(List<DeckList> entries, Options options, int threads, Consumer<String> progress,
-                              Collection<Running> running, Stop stop, ResultCache cache) {
+                              Collection<Running> running, Stop stop, ResultCache cache, boolean trees) {
         for (DeckList deck : entries) {
             VintageValidator.requireLegal(deck);
         }
@@ -154,9 +163,10 @@ public final class Tournament {
                             if (stop.requested()) {
                                 return null;
                             }
-                            GameResult r = cache == null ? null : cache.get(entries.get(a), entries.get(b), s, options);
+                            GameResult r = cache == null || trees ? null : cache.get(entries.get(a), entries.get(b), s, options);
                             boolean cached = r != null;
                             Running[] live = new Running[1];
+                            byte[] tree = null;
                             if (!cached) {
                                 try {
                                     Solver[] last = new Solver[1];
@@ -165,6 +175,9 @@ public final class Tournament {
                                             running.remove(live[0]);
                                         }
                                         Solver solver = new Solver(entries.get(a), entries.get(b), s, options);
+                                        if (trees) {
+                                            solver.recordTree();
+                                        }
                                         last[0] = solver;
                                         live[0] = new Running(a, b, s, solver);
                                         running.add(live[0]);
@@ -182,18 +195,21 @@ public final class Tournament {
                                     if (cache != null) {
                                         cache.put(entries.get(a), entries.get(b), s, options, r);
                                     }
+                                    if (last[0].tree() != null) {
+                                        tree = last[0].tree().toGzipJson();
+                                    }
                                 } catch (RuntimeException e) {
                                     // Don't lose the whole tournament to one game: score it as an unproven draw.
                                     r = new GameResult(0, 1, 0, 0, false, List.of("solver error: " + e.getMessage()),
                                             0, java.time.Duration.ZERO);
                                 }
                             }
-                            Game game = new Game(a, b, s, r, cached);
+                            Game game = new Game(a, b, s, r, cached, tree);
                             progress.accept(String.format("%s vs %s (%s on the play): %s%s%s",
                                     entries.get(a).name(), entries.get(b).name(),
                                     entries.get(s == 0 ? a : b).name(),
                                     r.describe().replace("A ", entries.get(a).name() + " ").replace("B ", entries.get(b).name() + " "),
-                                    r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")",
+                                    r.complete() ? "" : " (unproven beyond turn " + r.provenTurns() + ")",
                                     cached ? " (cached)" : ""));
                             if (live[0] != null) {
                                 running.remove(live[0]);

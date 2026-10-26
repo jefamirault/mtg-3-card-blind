@@ -54,7 +54,7 @@ public final class ResultsJson {
             m.put("pDraw", g.result().pDraw());
             m.put("pWinB", g.result().pLoss());
             m.put("complete", g.result().complete());
-            m.put("provenTurnLimit", g.result().provenTurnLimit());
+            m.put("provenTurns", g.result().provenTurns());
             m.put("nodes", g.result().nodes());
             m.put("seconds", g.result().elapsed().toMillis() / 1000.0);
             m.put("cached", g.cached());

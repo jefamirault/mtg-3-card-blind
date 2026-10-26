@@ -3,9 +3,18 @@ package tcb;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.zip.GZIPInputStream;
 
 import org.junit.jupiter.api.Test;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import tcb.deck.DeckList;
 import tcb.engine.DecisionTape;
@@ -59,6 +68,46 @@ class SolverTest {
     @Test
     void goblinGuideBeatsIslandsOnTheDraw() {
         assertEquals(1, solve(GUIDE, ISLANDS, 1).value(), 1e-9);
+    }
+
+    @Test
+    void recordsTheSearchedTree() throws IOException {
+        GameResult plain = new Solver(GUIDE, ISLANDS, 0, OPTS).solve();
+        Solver solver = new Solver(GUIDE, ISLANDS, 0, OPTS);
+        solver.recordTree();
+        GameResult recorded = solver.solve();
+        // Recording only watches: same result, same search.
+        assertEquals(plain.value(), recorded.value(), 1e-9);
+        assertEquals(plain.nodes(), recorded.nodes());
+        assertEquals(plain.principalVariation(), recorded.principalVariation());
+
+        JsonObject tree;
+        try (var in = new InputStreamReader(new GZIPInputStream(new ByteArrayInputStream(solver.tree().toGzipJson())),
+                StandardCharsets.UTF_8)) {
+            tree = JsonParser.parseReader(in).getAsJsonObject();
+        }
+        assertEquals(15, tree.get("turnLimit").getAsInt());
+        // A wins, so the first pass ("can A force a win?") settles it.
+        assertEquals(1, tree.getAsJsonArray("passes").size());
+        JsonObject root = tree.getAsJsonArray("passes").get(0).getAsJsonObject().getAsJsonObject("root");
+        assertEquals(1, root.get("t").getAsInt());
+        JsonObject best = null;
+        for (var c : root.getAsJsonArray("c")) {
+            if (c.getAsJsonObject().get("i").getAsInt() == root.get("best").getAsInt()) {
+                best = c.getAsJsonObject();
+            }
+        }
+        assertEquals(1, best.get("v").getAsDouble(), 1e-9, "the best first move wins: " + root);
+    }
+
+    @Test
+    void endingCountsTurnCycles() {
+        // Goblin Guide attacks on each of its own turns, 2 damage at a time: 10 attacks win on
+        // turn 10, on the play or on the draw (turn cycles, not Forge's 19th or 20th turn).
+        for (int start = 0; start < 2; start++) {
+            List<String> line = solve(GUIDE, ISLANDS, start).principalVariation();
+            assertEquals("=> A wins on turn 10 (A's turn)", line.get(line.size() - 1));
+        }
     }
 
     @Test

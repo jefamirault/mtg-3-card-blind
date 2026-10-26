@@ -25,6 +25,7 @@ import tcb.engine.ForgeEnv;
 import tcb.solve.Solver;
 import tcb.solve.Solver.GameResult;
 import tcb.solve.Tournament;
+import tcb.solve.Turns;
 import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Tournament.Results;
@@ -45,7 +46,7 @@ public final class Main {
 
     /** Search limits shared by solve and tournament (a picocli mixin, so public with a no-arg constructor). */
     public static class SearchOptions {
-        @Option(names = "--max-turns", defaultValue = "50", description = "Turn limit (counting both players' turns); unfinished games are draws. Default: ${DEFAULT-VALUE}")
+        @Option(names = "--max-turns", defaultValue = "25", description = "Turn limit, in turns of each player (turn 3 is each player's third turn); unfinished games are draws. Default: ${DEFAULT-VALUE}")
         int maxTurns;
 
         @Option(names = "--first-turns", description = "Iteratively deepen the turn limit from this value (doubling), so a budget overrun still leaves a result proven to a shorter limit. Default: off")
@@ -64,7 +65,9 @@ public final class Main {
         String time;
 
         Solver.Options toOptions() {
-            return new Solver.Options(maxTurns, firstTurns == null ? maxTurns : firstTurns, nodes, parseDuration(time), exactTurns, exhaustive);
+            int limit = Turns.forgeTurns(maxTurns);
+            int first = firstTurns == null ? limit : Turns.forgeTurns(firstTurns);
+            return new Solver.Options(limit, first, nodes, parseDuration(time), exactTurns, exhaustive);
         }
     }
 
@@ -137,7 +140,7 @@ public final class Main {
             for (int start = 0; start < 2; start++) {
                 GameResult r = new Solver(a, b, start, search.toOptions()).solve();
                 OUT.printf("%n%s on the play: %s%s  [%d nodes, %.1fs]%n", start == 0 ? "A" : "B", r.describe(),
-                        r.complete() ? "" : " (unproven beyond turn " + r.provenTurnLimit() + ")",
+                        r.complete() ? "" : " (unproven beyond turn " + r.provenTurns() + ")",
                         r.nodes(), r.elapsed().toMillis() / 1000.0);
                 r.principalVariation().forEach(line -> OUT.println("    " + line));
             }

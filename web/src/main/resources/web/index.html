@@ -184,6 +184,31 @@
   ol.line { margin: 0 0 .8rem; padding-left: 1.6rem; font-size: .9rem; color: var(--ink-soft); }
   ol.line li.end { list-style: none; color: var(--ink); font-weight: 600; margin-left: -1.6rem; }
 
+  /* --- search tree browser --- */
+  .tree { margin: 0 0 1rem; font-size: .9rem; }
+  .tree-open, .tree-crumb, .tree-label[type=button] {
+    border: 0; background: none; padding: 0; color: var(--action); cursor: pointer; text-align: left; font: inherit;
+  }
+  .tree-open { text-decoration: underline; }
+  .tree-open:disabled { color: var(--ink-soft); text-decoration: none; cursor: default; }
+  .tree-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .5rem; }
+  .tree-tabs button { border: 1px solid var(--rule); background: var(--stock); border-radius: 3px; padding: .2rem .55rem; cursor: pointer; font: inherit; font-size: .85rem; }
+  .tree-tabs button[aria-selected=true] { border-color: var(--action); box-shadow: inset 0 -2px 0 var(--action); }
+  .tree-pass { margin: 0 0 .4rem; color: var(--ink-soft); }
+  .tree-path { margin: .5rem 0; padding-left: 1.6rem; font-size: .85rem; max-height: 14rem; overflow: auto; }
+  .tree-path li[aria-current] .tree-crumb { color: var(--ink); font-weight: 600; cursor: default; }
+  .tree-node { background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; padding: .5rem .7rem; }
+  .tree-head { margin: 0 0 .4rem; font-weight: 600; }
+  .tree-options { list-style: none; margin: 0; padding: 0; }
+  .tree-options li { display: flex; flex-wrap: wrap; gap: .2rem .7rem; align-items: baseline; padding: .25rem 0; border-top: 1px dotted var(--rule); }
+  .tree-options li.skipped .tree-label { color: var(--ink-soft); }
+  .tree-label { overflow-wrap: anywhere; }
+  .tree-v { font-size: .82rem; font-weight: 600; }
+  .tree-v.win { color: var(--win); } .tree-v.loss { color: var(--loss); }
+  .tree-v.draw, .tree-v.bound, li.skipped .tree-v { color: var(--ink-soft); font-weight: 400; }
+  .tree-best { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--action); color: var(--action); border-radius: 3px; padding: 0 .3rem; }
+  .tree-leaf { margin: 0; padding: .5rem .7rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; }
+
   /* --- saved tournaments --- */
   .history { list-style: none; margin: 0 0 1.5rem; padding: 0; max-height: 13rem; overflow: auto; border-top: 1px solid var(--rule); }
   .history li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .6rem; border-bottom: 1px solid var(--rule); }
@@ -290,11 +315,14 @@
         <input type="number" id="opt-time" min="1" max="86400" step="1">
         <label for="opt-nodes">Node budget per game</label>
         <input type="number" id="opt-nodes" min="1000" max="1000000000" step="1000">
-        <label for="opt-turns">Turn limit</label>
-        <input type="number" id="opt-turns" min="1" max="200" step="1">
+        <label for="opt-turns" title="Turns of each player: turn 3 is each player's third turn">Turn limit</label>
+        <input type="number" id="opt-turns" min="1" max="100" step="1">
         <label for="opt-exact">Exact turns</label>
         <input type="checkbox" id="opt-exact">
+        <label for="opt-trees">Save search trees</label>
+        <input type="checkbox" id="opt-trees">
         <p class="hint">Games still going at the turn limit are draws. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
+        <p class="hint">Save search trees keeps every game's searched tree to browse afterwards. It's for small tournaments (up to 8 entries): each game's tree can take a few MB, and cached games are solved again.</p>
         <button type="button" class="reset" id="opt-reset">Reset to defaults</button>
       </div>
     </details>
@@ -653,7 +681,8 @@ $("#add").addEventListener("submit", async (ev) => {
 });
 
 // ---- search settings, remembered in this browser; blank fields use the server's defaults
-const optionInputs = { timeSeconds: "#opt-time", nodes: "#opt-nodes", maxTurns: "#opt-turns" };
+// (turns counts turn cycles; settings saved before that had maxTurns, counting each player's turn)
+const optionInputs = { timeSeconds: "#opt-time", nodes: "#opt-nodes", turns: "#opt-turns" };
 let defaults = null;
 function loadSettings(d) {
   if (defaults) return;
@@ -663,9 +692,10 @@ function loadSettings(d) {
   const o = { ...d, ...stored };
   for (const [k, sel] of Object.entries(optionInputs)) $(sel).value = o[k];
   $("#opt-exact").checked = !!o.exactTurns;
+  $("#opt-trees").checked = !!o.saveTrees;
 }
 function settings() {
-  const o = { exactTurns: $("#opt-exact").checked };
+  const o = { exactTurns: $("#opt-exact").checked, saveTrees: $("#opt-trees").checked };
   for (const [k, sel] of Object.entries(optionInputs)) {
     const v = $(sel).value.trim();
     o[k] = v === "" ? defaults?.[k] : Number(v);
@@ -675,7 +705,7 @@ function settings() {
 function saveSettings() {
   try { localStorage.setItem("tcb.options", JSON.stringify(settings())); } catch { /* not remembered */ }
 }
-for (const sel of [...Object.values(optionInputs), "#opt-exact"]) $(sel).addEventListener("change", saveSettings);
+for (const sel of [...Object.values(optionInputs), "#opt-exact", "#opt-trees"]) $(sel).addEventListener("change", saveSettings);
 $("#opt-reset").addEventListener("click", () => {
   try { localStorage.removeItem("tcb.options"); } catch { /* nothing stored */ }
   const d = defaults;
@@ -683,7 +713,7 @@ $("#opt-reset").addEventListener("click", () => {
   if (d) loadSettings(d);
 });
 const describeOptions = (o) => `${duration(o.timeSeconds)} and ${Number(o.nodes).toLocaleString()} nodes per game, `
-  + `turn limit ${o.maxTurns}${o.exactTurns ? ", exact turns" : ""}`;
+  + `turn limit ${o.turns ?? Math.floor(o.maxTurns / 2)}${o.exactTurns ? ", exact turns" : ""}${o.saveTrees ? ", search trees saved" : ""}`;
 
 // ---- tournament
 $("#run").addEventListener("click", async () => {
@@ -775,7 +805,7 @@ async function showSaved() {
     : `Tournament finished ${when(t.finished)}, solved in ${duration(t.seconds)}.`;
   out.replaceChildren(
     el("p", { class: "shown-head" }, head, t.options ? el("br") : null, t.options ? `Search: ${describeOptions(t.options)}.` : null),
-    ...renderResults(t.results));
+    ...renderResults(t.results, t.options?.saveTrees ? id : null));
 }
 
 function render(status) {
@@ -866,7 +896,93 @@ function cellColor(points) {
   return `rgb(${rgb.join(",")})`;
 }
 
-function renderResults(r) {
+// ---- search tree browser: one decision at a time, with the path from the start of the game
+// above it. Values are what the search proved, from deck a's point of view (see SearchTree).
+function treeBrowser(id, k, g) {
+  const box = el("div", { class: "tree" });
+  const open = el("button", { class: "tree-open", type: "button" }, "Browse the search tree");
+  open.addEventListener("click", async () => {
+    open.disabled = true;
+    open.textContent = "Loading the search tree…";
+    const { ok, data } = await api("GET", `/api/history/${encodeURIComponent(id)}/trees/${k}`);
+    if (!ok) {
+      box.replaceChildren(el("p", { class: "problems" }, data.error || "Couldn't load the search tree."));
+      return;
+    }
+    showTree(box, data, g);
+  });
+  box.append(open);
+  return box;
+}
+
+const named = (text, g) => text.replace(/\bA\b/g, g.a).replace(/\bB\b/g, g.b);
+
+// [text, class] for an option's value: +1 a wins, -1 b wins, bounds where the search stopped early
+function verdict(c, g) {
+  const v = c.v, zero = Math.abs(v) < 1e-9;
+  if (v > 1 - 1e-9) return [`${g.a} wins`, "win"];
+  if (v < -1 + 1e-9) return [`${g.b} wins`, "loss"];
+  if (c.b === "=") return zero ? ["draw", "draw"] : [`expected ${v > 0 ? "+" : ""}${v.toFixed(2)} for ${g.a}`, "draw"];
+  if (c.b === "<=") return zero ? [`${g.a} can't win`, "bound"] : [`at most ${v.toFixed(2)} for ${g.a}`, "bound"];
+  return zero ? [`${g.b} can't win`, "bound"] : [`at least ${v.toFixed(2)} for ${g.a}`, "bound"];
+}
+
+function showTree(box, data, g) {
+  let pass = 0;
+  let path = []; // [{node, option}] from the root to the shown node
+  const passes = data.passes;
+  const nodeAt = () => path.length ? path[path.length - 1].child.n : passes[pass].root;
+
+  function render() {
+    const tabs = passes.length > 1 ? el("div", { class: "tree-tabs", role: "tablist" }, ...passes.map((p, i) => {
+      const b = el("button", { type: "button", role: "tab", "aria-selected": String(i === pass) }, named(p.name, g));
+      b.addEventListener("click", () => { pass = i; path = []; render(); });
+      return b;
+    })) : el("p", { class: "tree-pass" }, "Pass: " + named(passes[pass].name, g));
+
+    const crumbs = el("ol", { class: "tree-path" },
+      crumb("Start of the game", 0),
+      ...path.map((s, i) => crumb(`T${s.node.t} ${who(s.node)} ${s.node.k}: ${named(s.node.o[s.child.i], g)}`, i + 1)));
+
+    box.replaceChildren(tabs, el("p", { class: "caption" },
+      "Values are what the search proved. It stops looking at a position once it can't change the result, "
+      + "so some say only who can't win, and options it skipped are marked."
+      + (data.truncated ? ` This tree hit the ${data.maxNodes.toLocaleString()}-node limit per pass, so parts weren't saved.` : "")),
+      crumbs, nodeView(nodeAt()));
+  }
+
+  function crumb(text, depth) {
+    const b = el("button", { type: "button", class: "tree-crumb" }, text);
+    b.addEventListener("click", () => { path = path.slice(0, depth); render(); });
+    return el("li", depth === path.length ? { "aria-current": "step" } : {}, b);
+  }
+
+  const who = (n) => n.p === 0 ? g.a : n.p === 1 ? g.b : "Chance";
+
+  function nodeView(n) {
+    if (n == null) return el("p", { class: "tree-leaf" }, "Not saved: the tree reached its size limit before this point.");
+    if (n.end) return el("p", { class: "tree-leaf" }, "Game over: " + named(n.end, g));
+    if (n.seen) return el("p", { class: "tree-leaf" }, "Same position as one searched on another line; its value was reused from there.");
+    const tried = new Map(n.c.map((c) => [c.i, c]));
+    return el("div", { class: "tree-node" },
+      el("p", { class: "tree-head" }, `Turn ${n.t}: ${who(n)} decides (${n.k}), ${n.o.length} options, ${n.c.length} searched`),
+      el("ul", { class: "tree-options" }, ...n.o.map((label, i) => {
+        const c = tried.get(i);
+        if (!c) return el("li", { class: "skipped" }, el("span", { class: "tree-label" }, named(label, g)),
+          el("span", { class: "tree-v" }, "not searched: an earlier option already settled this"));
+        const [text, cls] = verdict(c, g);
+        const go = el("button", { type: "button", class: "tree-label" }, named(label, g));
+        go.addEventListener("click", () => { path = [...path, { node: n, child: c }]; render(); });
+        return el("li", {}, go, el("span", { class: "tree-v " + cls }, text),
+          i === n.best ? el("span", { class: "tree-best" }, "best") : null);
+      })));
+  }
+
+  render();
+}
+
+// treesId: the saved tournament whose games have search trees to browse; null if none
+function renderResults(r, treesId = null) {
   const names = r.entries.map((e) => e.name);
   const standings = el("ol", { class: "standings" }, ...r.standings.map((s, i) =>
     el("li", {},
@@ -885,22 +1001,24 @@ function renderResults(r) {
       : Object.assign(el("td", { title: `${n}: ${fmt(p)} of 6 points` }, fmt(p)), { style: `background:${cellColor(p)}` }))));
   const matrix = el("div", { class: "matrix-wrap" }, el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, ...rows)));
 
-  const games = r.games.map((g) => {
+  const games = r.games.map((g, k) => {
     const winner = g.pWinA > 0.999 ? g.a : g.pWinB > 0.999 ? g.b : null;
     const certainDraw = g.pDraw > 0.999;
     const verdict = winner ? `${winner} wins` : certainDraw ? "Draw"
       : `${g.a} ${(100 * g.pWinA).toFixed(0)}%, draw ${(100 * g.pDraw).toFixed(0)}%, ${g.b} ${(100 * g.pWinB).toFixed(0)}%`;
     const cls = certainDraw || !winner ? "draw" : "win";
     const steps = g.line.map((s) => s.startsWith("=>")
-      ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " "))
+      ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " ")
+        .replace(/\(([AB])'s turn\)/, (_, p) => `(${p === "A" ? g.a : g.b}'s turn)`))
       : el("li", {}, s.replace(/^A /, g.a + ": ").replace(/^B /, g.b + ": ").replace(/^Chance /, "Chance: ")));
     return el("details", {},
       el("summary", {},
         el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
         el("span", { class: "verdict " + cls }, verdict),
-        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurnLimit}`),
+        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`),
         g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
-      el("ol", { class: "line" }, ...steps));
+      el("ol", { class: "line" }, ...steps),
+      treesId ? treeBrowser(treesId, k, g) : null);
   });
 
   const notPlayed = r.notPlayed || [];
@@ -917,7 +1035,8 @@ function renderResults(r) {
     el("p", { class: "caption" }, "Points each row deck scored against each column deck over their two games: 6 means it won both, 2 means two draws."
       + (notPlayed.length ? " A dot marks a pair with a game left unplayed." : "")),
     el("h3", {}, "Games"),
-    el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found."),
+    el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found"
+      + (treesId ? ", and browse the tree it searched." : ".")),
     ...games,
     ...unplayedNote,
   ];

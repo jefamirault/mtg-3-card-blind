@@ -17,7 +17,9 @@ judged on is the deck you chose, not how well you play.
   - Players maximise P(win) − P(loss).
   - Random events (coin flips, dice, random discard, shuffles) are averaged over every outcome.
   - A game that can loop forever is a **draw**, and so is a game still going at the turn limit
-    (50 turns by default).
+    (25 turns by default).
+- Turns are numbered from 1 and count turn cycles: turn 3 is each player's third turn, so a
+  result like "wins on turn 3 (B's turn)" names whose half of the turn it was.
 - Scoring per game: **win 3, draw 1, loss 0**. For games involving randomness the score is the
   expectation, 3·P(win) + P(draw). The deck with the most points wins.
 
@@ -83,7 +85,7 @@ Search options shared by `solve` and `tournament`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--max-turns` | 50 | Turn limit (counting both players' turns); a game still going counts as a draw |
+| `--max-turns` | 25 | Turn limit, in turns of each player; a game still going counts as a draw |
 | `--nodes` | 2,000,000 | Search nodes per game before giving up |
 | `--time` | 10m | Time per game before giving up |
 | `--first-turns` | off | Iteratively deepen the turn limit from here (doubling), so a game that runs out of budget still has a result proven to a shorter limit |
@@ -98,6 +100,13 @@ the web UI shows each game being solved with its node count, elapsed time and ho
 budget it has used. Expanding a game shows the line its search is on: each decision from the start
 of the game, the option being tried there and how many of its options have been tried (the first
 30 decisions; the deeper ones change too fast to follow).
+
+*Save search trees* (in *Search settings*, off by default, up to 8 entries) keeps each game's
+searched tree, so a finished game can be browsed one decision at a time: every option, what the
+search proved about it and which was best. Values are what alpha-beta proved, so many are bounds
+("swords can't win") rather than exact, and options it skipped are marked. Each search pass keeps
+at most 50,000 nodes, saved gzipped in `history/<id>.trees/`. Cached games are solved again, since
+the cache has no trees.
 
 ## How it works
 
