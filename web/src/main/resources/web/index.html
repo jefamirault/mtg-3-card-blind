@@ -227,7 +227,9 @@
   /* --- animated replay: a dark table, deck b across the top, deck a at the bottom --- */
   .watch { border: 0; background: none; padding: 0; color: var(--action); cursor: pointer; font: inherit; font-size: .9rem; text-decoration: underline; margin: 0 1.2rem .8rem 0; }
   #board {
-    --bw: clamp(2.6rem, min(7.2vw, 10.5vh), 5.6rem); /* card width */
+    /* card width: two battlefield rows (one per side) share the height left after the header,
+       caption and controls; --zoom is the Card size control */
+    --bw: calc(clamp(3rem, min(10vw, (100vh - 17rem) / 3.3), 10rem) * var(--zoom, 1));
     position: fixed; inset: 0; z-index: 25; display: grid; grid-template-rows: auto 1fr auto auto;
     background: radial-gradient(ellipse at center, #26384A 0%, #17202B 75%); color: #E9EDF3; overflow: hidden;
   }
@@ -237,8 +239,12 @@
   .bd-status { margin: 0; color: #B9C3D1; font-size: .9rem; }
   .bd-close { margin-left: auto; border: 0; background: none; color: #E9EDF3; font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 .3rem; }
   .bd-table { display: grid; grid-template-rows: auto 1fr auto; gap: .3rem; padding: .4rem 1rem; min-height: 0; overflow: auto; }
-  .bd-side { display: grid; grid-template-columns: 1fr auto; gap: .3rem 1rem; }
+  .bd-side { display: grid; grid-template-columns: 1fr auto; gap: .3rem 1.2rem; align-items: center; }
   .bd-rows { display: grid; gap: .4rem; min-width: 0; }
+  /* the side column: hand, graveyard and exile, at a smaller size (3CB hands are small) */
+  .bd-aside { display: grid; grid-template-columns: auto auto; gap: .15rem .9rem; align-content: center; }
+  .bd-aside .bd-hand { grid-column: 1 / -1; display: flex; gap: .3rem; min-height: calc(var(--bw) * .62 * 88 / 63); }
+  .bd-aside .bd-hand .bcard { width: calc(var(--bw) * .62); }
   .bd-row { display: flex; flex-wrap: wrap; gap: .45rem; min-height: calc(var(--bw) * 88 / 63); align-items: center; }
   .bd-row .land.first { margin-left: auto; } /* lands at the far end of the battlefield row */
   .bd-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: #8D99AA; }
@@ -250,9 +256,11 @@
   .bd-delta { position: absolute; left: 100%; top: -.2rem; margin-left: .3rem; font-size: .9rem; animation: bd-float 1.4s ease-out forwards; }
   .bd-delta.down { color: #FF8A80; } .bd-delta.up { color: #8FE3B0; }
   @keyframes bd-float { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-1rem); } }
-  .bd-piles { display: grid; gap: .2rem .8rem; grid-template-columns: auto auto; align-content: center; }
-  .bd-pile { display: flex; min-height: calc(var(--bw) * .6 * 88 / 63); min-width: calc(var(--bw) * .6); padding-right: calc(var(--bw) * .35); }
-  .bd-pile .bcard { width: calc(var(--bw) * .6); margin-right: calc(var(--bw) * -.35); }
+  .bd-pile { display: flex; min-height: calc(var(--bw) * .45 * 88 / 63); min-width: calc(var(--bw) * .45); padding-right: calc(var(--bw) * .3); }
+  .bd-pile .bcard { width: calc(var(--bw) * .45); margin-right: calc(var(--bw) * -.3); }
+  /* hovering a card shows it big beside it */
+  .bd-peek { position: fixed; z-index: 26; width: min(20rem, 42vw); aspect-ratio: 63 / 88; border-radius: 4.5%; box-shadow: 0 10px 40px rgba(0, 0, 0, .7); pointer-events: none; }
+  .bd-peek[hidden] { display: none; }
   .bd-mid { display: flex; align-items: center; justify-content: center; gap: 1rem; min-height: 2rem; border-top: 1px dashed rgba(255, 255, 255, .1); border-bottom: 1px dashed rgba(255, 255, 255, .1); }
   .bd-stack { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
   .bd-stack-item { display: flex; align-items: center; gap: .5rem; background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 210, 120, .5); border-radius: 4px; padding: .3rem .5rem .3rem .3rem; font-size: .8rem; max-width: 22rem; }
@@ -262,7 +270,7 @@
   .bd-controls button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); color: #E9EDF3; border-radius: 3px; min-width: 2.4rem; padding: .25rem .5rem; cursor: pointer; }
   .bd-controls button:hover { background: rgba(255, 255, 255, .15); }
   .bd-controls input[type=range] { flex: 1 1 12rem; accent-color: #FFD37A; }
-  .bd-controls label { font-size: .85rem; color: #B9C3D1; display: flex; align-items: center; gap: .35rem; }
+  .bd-controls label { font-size: .85rem; color: #B9C3D1; display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
   .bd-controls select { font: inherit; font-size: .85rem; }
   .bd-pos { font-size: .85rem; color: #B9C3D1; min-width: 4.5rem; }
   .bcard { width: var(--bw); aspect-ratio: 63 / 88; flex: 0 0 auto; border: 0; padding: 0; background: none; cursor: zoom-in; position: relative; }
@@ -279,8 +287,10 @@
   .bc-badge.dmg { background: #B03B3B; }
   .bc-badge.counter { background: #2B4FBF; }
   @media (max-width: 640px) {
+    #board { --bw: calc(clamp(2.6rem, min(15vw, (100vh - 22rem) / 4.4), 6rem) * var(--zoom, 1)); }
     .bd-side { grid-template-columns: 1fr; }
-    .bd-piles { grid-auto-flow: column; justify-content: start; }
+    .bd-aside { grid-template-columns: auto auto auto; justify-content: start; }
+    .bd-aside .bd-hand { grid-column: auto; grid-row: span 2; }
   }
 
   /* --- search tree browser --- */
@@ -519,7 +529,9 @@
     <span class="bd-pos"></span>
     <label>Speed <select class="bd-speed"><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
     <label><input type="checkbox" class="bd-passes"> Show passes</label>
+    <label>Card size <input type="range" class="bd-zoom" min="0.6" max="1.5" step="0.1" value="1"></label>
   </div>
+  <img class="bd-peek" alt="" hidden>
 </div>
 
 <div id="lightbox" hidden role="dialog" aria-modal="true" tabindex="-1">
@@ -1591,19 +1603,19 @@ function bdSide(p, me, active, lifeBefore) {
     el("span", { class: "bd-meta" }, `library ${p.library}`));
   const field = el("div", { class: "bd-row field", "aria-label": "Battlefield" }, ...others.map((c) => bcard(c, me)),
     ...lands.map((c, i) => { const e = bcard(c, me); e.classList.add("land"); if (i === 0) e.classList.add("first"); return e; }));
-  const hand = el("div", { class: "bd-row hand", "aria-label": "Hand" }, ...p.hand.map((c) => bcard(c, me)));
-  const rows = me ? [field, hand] : [hand, field];
-  const pile = (name, cards) => [el("div", { class: "bd-label" }, `${name} ${cards.length}`),
-    el("div", { class: "bd-pile" }, ...cards.map((c) => bcard(c, me)))];
+  // beside the battlefield: the hand, then graveyard | exile (labels on top, piles below)
+  const aside = el("div", { class: "bd-aside" },
+    el("div", { class: "bd-label", style: "grid-column: 1 / -1" }, `Hand ${p.hand.length}`),
+    el("div", { class: "bd-hand", "aria-label": "Hand" }, ...p.hand.map((c) => bcard(c, me))),
+    el("div", { class: "bd-label" }, `Graveyard ${p.graveyard.length}`), el("div", { class: "bd-label" }, `Exile ${p.exile.length}`),
+    el("div", { class: "bd-pile" }, ...p.graveyard.map((c) => bcard(c, me))), el("div", { class: "bd-pile" }, ...p.exile.map((c) => bcard(c, me))));
   const side = el("section", { class: "bd-side " + (me ? "me" : "opp") + (active ? " active" : ""), "aria-label": sideName(p.name) },
-    el("div", { class: "bd-rows" }, ...rows),
-    // labels on top, piles below: Graveyard | Exile
-    el("div", { class: "bd-piles" }, ...[pile("Graveyard", p.graveyard), pile("Exile", p.exile)].flatMap((x) => x).sort((x, y) =>
-      Number(x.classList.contains("bd-pile")) - Number(y.classList.contains("bd-pile")))));
+    el("div", { class: "bd-rows" }, field), aside);
   return me ? [side, info] : [info, side];
 }
 
 function bdShow(at, animate = true) {
+  peek.hidden = true; // its card is about to be replaced
   bd.at = Math.max(0, Math.min(at, bd.shown.length - 1));
   const i = bd.shown[bd.at];
   const f = bd.frames[i];
@@ -1675,12 +1687,40 @@ function bdPause() {
 const bdToggle = () => bd.timer ? bdPause() : bdPlay();
 function closeReplay() {
   if (board.hidden) return;
+  peek.hidden = true;
   bdPause();
   board.hidden = true;
   document.body.style.overflow = "";
   bd = null;
   bdReturn?.focus();
 }
+
+// Card size, remembered in this browser
+const bdZoom = board.querySelector(".bd-zoom");
+try { bdZoom.value = localStorage.getItem("tcb.boardZoom") || "1"; } catch { /* default size */ }
+board.style.setProperty("--zoom", bdZoom.value);
+bdZoom.addEventListener("input", () => {
+  board.style.setProperty("--zoom", bdZoom.value);
+  try { localStorage.setItem("tcb.boardZoom", bdZoom.value); } catch { /* not remembered */ }
+});
+// Hovering (or focusing) a card shows it big beside it, on whichever side has room.
+const peek = board.querySelector(".bd-peek");
+function showPeek(e) {
+  const card = e.target.closest?.(".bcard");
+  const img = card?.querySelector("img");
+  if (!img) { peek.hidden = true; return; }
+  const r = card.getBoundingClientRect();
+  peek.src = img.src;
+  peek.hidden = false;
+  const w = peek.getBoundingClientRect().width, h = peek.getBoundingClientRect().height;
+  const left = r.right + 12 + w < innerWidth ? r.right + 12 : Math.max(8, r.left - 12 - w);
+  peek.style.left = left + "px";
+  peek.style.top = Math.min(Math.max(8, r.top + r.height / 2 - h / 2), innerHeight - h - 8) + "px";
+}
+bdTable.addEventListener("pointerover", showPeek);
+bdTable.addEventListener("focusin", showPeek);
+bdTable.addEventListener("pointerleave", () => { peek.hidden = true; });
+bdTable.addEventListener("focusout", () => { peek.hidden = true; });
 
 board.querySelector(".bd-close").addEventListener("click", closeReplay);
 board.querySelector(".bd-first").addEventListener("click", () => { bdPause(); bdShow(0); });
