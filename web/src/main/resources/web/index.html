@@ -104,6 +104,7 @@
     display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: .9rem;
     padding: .9rem 0; border-top: 1px solid var(--rule);
   }
+  .entry[hidden] { display: none; }
   .entry-name { font-weight: 600; }
   .entry-note { font-size: .85rem; color: var(--loss); }
   .entry-notes { font-size: .85rem; white-space: pre-line; overflow-wrap: anywhere; margin-top: .15rem; }
@@ -129,6 +130,17 @@
   .import-list .why { flex-basis: 100%; color: var(--loss); font-size: .82rem; }
   .import-body label.check { display: flex; gap: .4rem; align-items: center; color: var(--ink); }
   a.export { font-size: .88rem; color: var(--action); }
+  .entry-search { display: grid; gap: .3rem; margin: 0 0 .6rem; }
+  .entry-search input { width: 100%; padding: .45rem .6rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; }
+  .syntax { border: 0; font-size: .85rem; }
+  .syntax > summary { padding: 0; color: var(--action); display: list-item; }
+  .syntax table { border-collapse: collapse; margin: .4rem 0; font-size: .82rem; width: 100%; }
+  .syntax td { padding: .2rem .6rem .2rem 0; vertical-align: top; border-top: 1px dotted var(--rule); }
+  .syntax td:first-child { width: 42%; }
+  .syntax td code { display: inline-block; margin-right: .3rem; }
+  .syntax code { font-size: .82rem; }
+  .syntax p { margin: .3rem 0; color: var(--ink-soft); max-width: 46ch; }
+  .lbfind { border: 0; background: none; padding: 0; color: var(--action); cursor: pointer; font: inherit; text-decoration: underline; }
   .editing-note { margin: 0; font-size: .9rem; color: var(--action); font-weight: 600; }
   .remove {
     border: 0; background: none; color: var(--ink-soft); cursor: pointer; padding: .2rem .4rem; font-size: .9rem;
@@ -453,6 +465,29 @@
         </div>
       </div>
     </details>
+    <div class="entry-search" id="entry-search-box" hidden>
+      <input type="search" id="entry-search" placeholder="Search entries… (try t:creature -c:u)" aria-label="Search entries" aria-keyshortcuts="/">
+      <details class="syntax">
+        <summary>Search syntax</summary>
+        <table>
+          <tr><td><code>goblin</code> <code>"to plow"</code></td><td>words or a phrase in the name, cards or notes</td></tr>
+          <tr><td><code>-island</code></td><td>leave out matches; works on any term or <code>-(…)</code></td></tr>
+          <tr><td><code>n:sligh</code></td><td>name contains (<code>name:</code>)</td></tr>
+          <tr><td><code>card:bolt</code> <code>card="black lotus"</code></td><td>a card's name contains / is exactly (<code>cards:</code>)</td></tr>
+          <tr><td><code>t:creature</code></td><td>a card's type line contains (<code>type:</code>)</td></tr>
+          <tr><td><code>o:haste</code></td><td>a card's rules text contains (<code>oracle:</code>)</td></tr>
+          <tr><td><code>c:ur</code> <code>c=r</code> <code>c&lt;=rw</code> <code>c:c</code></td><td>the deck's colors include / are exactly / are within; <code>c:c</code> is colorless. Letters <code>wubrg</code> or names like <code>red</code>, <code>izzet</code> (<code>color:</code>)</td></tr>
+          <tr><td><code>mv&lt;=1</code></td><td>a card's mana value (<code>cmc</code>)</td></tr>
+          <tr><td><code>lands&gt;=2</code> <code>creatures:0</code> <code>spells:3</code></td><td>how many of the deck's cards are lands / creatures / not lands</td></tr>
+          <tr><td><code>notes:aggro</code> <code>has:notes</code></td><td>the notes contain / there are notes</td></tr>
+          <tr><td><code>added&gt;=2026-10</code> <code>edited:2026-10-26</code></td><td>when it was added / last changed (<code>created</code>, <code>updated</code>); <code>YYYY</code>, <code>YYYY-MM</code> or <code>YYYY-MM-DD</code></td></tr>
+          <tr><td><code>is:legal</code> <code>is:illegal</code></td><td>Vintage-legal 3-card deck or not</td></tr>
+          <tr><td><code>is:in</code> <code>is:out</code></td><td>ticked for the tournament or not</td></tr>
+          <tr><td><code>a or b</code> <code>(a or b) c</code></td><td>either; parentheses group</td></tr>
+        </table>
+        <p>Card terms match when any of the deck's cards does. An entry missing a value (no date, card data not loaded yet) never matches a term about it, so <code>-added&lt;2026</code> keeps entries without dates. <kbd>/</kbd> jumps here.</p>
+      </details>
+    </div>
     <p class="pick" id="pick" hidden><span id="pick-count"></span>
       <button type="button" id="pick-all">All</button><button type="button" id="pick-none">None</button></p>
     <ul class="entries" id="entries"></ul>
@@ -522,6 +557,259 @@ async function api(method, path, body) {
   return { ok: res.ok, data };
 }
 
+// ---- entry search (Scryfall-style; no DOM in this block, so it can be tested on its own)
+// Scryfall-style search: words, "phrases", -negation, key:value terms with
+// comparison operators, `or`, and (parens). Config-driven, so a project only
+// describes its fields. ES5 on purpose: drops into any page, including Google
+// Apps Script HtmlService.
+//
+//   var search = createSearch({
+//     text: function (item) { return item.title + ' ' + item.notes; },  // bare words
+//     keys: {
+//       't title':  { type: 'text',   get: function (g) { return g.title; } },
+//       'c console': { type: 'exact', get: function (g) { return g.console; },
+//                      aliases: { gba: 'Game Boy Advance' } },
+//       'y year date': { type: 'date', get: function (g) { return g.releaseDate; } },
+//       'p players': { type: 'range', get: function (g) { return [g.minP, g.maxP]; } },
+//       'likes':    { type: 'number', get: function (g) { return g.likes; }, colon: '>=' },
+//       'size':     { type: 'size',   get: function (g) { return g.bytes; } },
+//       'custom':   { test: function (g, t) { return ...; } }
+//     },
+//     has: { cover: function (g) { return g.hasCover; } }   // has:x and is:x
+//   });
+//   var q = search.parse(input.value);        // parse once per render
+//   rows = items.filter(function (g) { return search.matches(g, q); });
+//
+// A term is {neg, key, op, val}; val is lowercased. ops: : = < > <= >=.
+// Field values that are missing ('' / null / NaN) never match a term, so
+// `year<2000` drops undated items and `-year<2000` keeps them.
+function createSearch(config) {
+  var KEYS = {};
+  Object.keys(config.keys || {}).forEach(function (names) {
+    names.split(/\s+/).forEach(function (n) { KEYS[n.toLowerCase()] = config.keys[names]; });
+  });
+  var HAS = config.has || {};
+
+  // Splits a query into terms, parens and "or". A key with no value yet
+  // (mid-typing "c:") is dropped rather than matching nothing. Bare "and" is
+  // ignored; quote it ("and") to search for the word.
+  function tokenize(q) {
+    var re = /(-?)\(|\)|(-?)(?:(\w+)(:|>=|<=|>|<|=))?(?:"([^"]*)"?|([^\s()]*))/g;
+    var out = [], m;
+    while ((m = re.exec(q))) {
+      if (m[0] === '') { re.lastIndex++; continue; }
+      if (m[0].slice(-1) === '(' && m[5] === undefined && m[6] === undefined) {
+        out.push({ type: '(', neg: !!m[1] });
+      } else if (m[0] === ')') {
+        out.push({ type: ')' });
+      } else {
+        var quoted = m[5] !== undefined;
+        var val = (quoted ? m[5] : m[6] || '').toLowerCase();
+        var key = (m[3] || '').toLowerCase();
+        if (!key && !quoted && !m[2] && (val === 'or' || val === 'and')) {
+          if (val === 'or') { out.push({ type: 'or' }); }
+        } else if (val !== '') {
+          out.push({ type: 'term', neg: !!m[2], key: key, op: m[4] || '', val: val });
+        }
+      }
+    }
+    return out;
+  }
+
+  // Terms side by side must all match; "or" binds looser; parens group.
+  // Unbalanced parens and a dangling "or" are forgiven so a half-typed query
+  // still filters sensibly.
+  function parse(q) {
+    var toks = tokenize(q || ''), pos = 0;
+    function parseOr() {
+      var parts = [parseAnd()];
+      while (pos < toks.length && toks[pos].type === 'or') {
+        pos++;
+        parts.push(parseAnd());
+      }
+      parts = parts.filter(function (p) { return p.and.length > 0; });
+      return parts.length === 1 ? parts[0] : { or: parts };
+    }
+    function parseAnd() {
+      var parts = [];
+      while (pos < toks.length && toks[pos].type !== 'or' && toks[pos].type !== ')') {
+        var t = toks[pos++];
+        if (t.type === '(') {
+          var inner = parseOr();
+          if (pos < toks.length && toks[pos].type === ')') { pos++; }
+          parts.push({ neg: t.neg, node: inner });
+        } else {
+          parts.push({ neg: t.neg, term: t });
+        }
+      }
+      return { and: parts };
+    }
+    var top = [];
+    while (pos < toks.length) {
+      top.push({ neg: false, node: parseOr() });
+      if (pos < toks.length) { pos++; }  // stray ")" or "or"
+    }
+    return { and: top };
+  }
+
+  function matches(item, node) {
+    if (node.or) {
+      return node.or.length === 0 || node.or.some(function (n) { return matches(item, n); });
+    }
+    return node.and.every(function (p) {
+      return (p.node ? matches(item, p.node) : testTerm(item, p.term)) !== p.neg;
+    });
+  }
+
+  function compare(a, op, b) {
+    return op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b
+      : op === '<=' ? a <= b : a === b;
+  }
+  function str(v) { return v == null ? '' : String(v); }
+  function haystack(item) { return str(config.text(item)).toLowerCase(); }
+
+  var SIZE = { '': 2, k: 1, m: 2, g: 3, t: 4 };  // bare number = MB
+
+  var TYPES = {
+    // ':' contains, '=' whole value. aliases rewrite the query value.
+    text: function (v, t, spec) {
+      var f = str(v).toLowerCase();
+      if (!f) { return false; }
+      var want = (spec.aliases && spec.aliases[t.val]) || t.val;
+      return t.op === '=' ? f === want.toLowerCase() : f.indexOf(want.toLowerCase()) >= 0;
+    },
+    // Like text, but an alias matches its target exactly (c:gb is not Game Boy
+    // Color) and `none` matches a blank value.
+    exact: function (v, t, spec) {
+      var f = str(v).toLowerCase();
+      if (t.val === 'none') { return !f; }
+      if (spec.aliases && spec.aliases.hasOwnProperty(t.val)) {
+        return f === spec.aliases[t.val].toLowerCase();
+      }
+      return TYPES.text(v, t, {});
+    },
+    // A list of values (tags, colors, keywords); any one matching is enough.
+    list: function (v, t, spec) {
+      return (v || []).some(function (x) { return TYPES.exact(x, t, spec); });
+    },
+    number: function (v, t, spec) {
+      var n = parseFloat(t.val);
+      if (v === '' || v == null || isNaN(v) || isNaN(n)) { return false; }
+      return compare(+v, t.op === ':' ? spec.colon || '=' : t.op, n);
+    },
+    // [min, max]: ':' means N is within the range; comparisons use max.
+    range: function (v, t) {
+      var n = parseFloat(t.val);
+      if (!v || isNaN(v[0]) || isNaN(n)) { return false; }
+      return t.op === ':' ? v[0] <= n && n <= v[1] : compare(v[1], t.op, n);
+    },
+    // YYYY[-MM[-DD]] strings, compared cut to the query's length:
+    // year:1996, date>=1995-06, year:199 (the 1990s).
+    date: function (v, t) {
+      v = str(v);
+      if (!v || !/^[\d-]+$/.test(t.val)) { return false; }
+      return compare(v.slice(0, t.val.length), t.op === ':' ? '=' : t.op, t.val);
+    },
+    // Bytes vs "512k", "1.5mb", "2g", "100b"; ':' means at most.
+    size: function (v, t) {
+      var m = /^([\d.]+)([kmgt]?)(b?)$/.exec(t.val);
+      if (!m || v == null || v === '' || v < 0) { return false; }
+      var exp = m[2] || !m[3] ? SIZE[m[2]] : 0;
+      return compare(+v, t.op === ':' ? '<=' : t.op, parseFloat(m[1]) * Math.pow(1024, exp));
+    }
+  };
+
+  function testTerm(item, t) {
+    if (!t.key) { return haystack(item).indexOf(t.val) >= 0; }
+    if (t.key === 'has' || t.key === 'is') {
+      // Unknown (or half-typed) values don't filter.
+      return HAS.hasOwnProperty(t.val) ? !!HAS[t.val](item) : true;
+    }
+    var spec = KEYS[t.key];
+    // Not a known key: treat "foo:bar" as plain text.
+    if (!spec) { return haystack(item).indexOf(t.key + t.op + t.val) >= 0; }
+    if (spec.test) { return spec.test(item, t); }
+    return TYPES[spec.type || 'text'](spec.get(item), t, spec);
+  }
+
+  // The term that filters to exactly `value` for `key` — for click-to-filter
+  // chips. Prefers the first alias that maps to it.
+  function termFor(key, value) {
+    var spec = KEYS[key] || {}, lower = str(value).toLowerCase();
+    for (var a in spec.aliases || {}) {
+      if (spec.aliases[a].toLowerCase() === lower) { return key + ':' + a; }
+    }
+    return /[\s"()]/.test(lower) ? key + '="' + lower.replace(/"/g, '') + '"' : key + '=' + lower;
+  }
+
+  // Appends a term to a query string unless it's already there.
+  function addTerm(q, term) {
+    q = str(q).trim();
+    return (' ' + q + ' ').indexOf(' ' + term + ' ') >= 0 ? q : (q ? q + ' ' + term : term);
+  }
+
+  return { parse: parse, matches: matches, tokenize: tokenize, termFor: termFor, addTerm: addTerm };
+}
+
+
+const cardData = new Map(); // card name -> Scryfall card, filled in as the entries' cards load
+const cardFaces = (c) => (c.card_faces?.length ? c.card_faces : [c]);
+const typeLine = (c) => (c.type_line || cardFaces(c).map((f) => f.type_line || "").join(" // ")).toLowerCase();
+const oracleText = (c) => cardFaces(c).map((f) => f.oracle_text || "").join("\n").toLowerCase() || (c.oracle_text || "").toLowerCase();
+// An entry's cards' Scryfall data, or null until all of them have loaded (so card terms don't
+// match on a partial deck: missing values never match).
+function deckCards(e) {
+  const cards = e.cards.map((n) => cardData.get(n));
+  return cards.every(Boolean) ? cards : null;
+}
+const anyCard = (e, test) => { const cards = deckCards(e); return !!cards && cards.some(test); };
+const countCards = (e, test) => { const cards = deckCards(e); return cards ? cards.filter(test).length : NaN; };
+const cmp = (a, op, b) => op === ">" ? a > b : op === "<" ? a < b : op === ">=" ? a >= b : op === "<=" ? a <= b : a === b;
+const COLOR_WORDS = { white: "w", blue: "u", black: "b", red: "r", green: "g", colorless: "c",
+  azorius: "wu", dimir: "ub", rakdos: "br", gruul: "rg", selesnya: "gw", orzhov: "wb", izzet: "ur", golgari: "bg", boros: "rw", simic: "gu" };
+function deckColors(e) {
+  const cards = deckCards(e);
+  if (!cards) return null;
+  return new Set(cards.flatMap((c) => c.colors ?? cardFaces(c).flatMap((f) => f.colors || [])).map((x) => x.toLowerCase()));
+}
+
+const entrySearch = createSearch({
+  text: (e) => [e.name, ...e.cards, e.notes || ""].join("\n"),
+  keys: {
+    "n name": { type: "text", get: (e) => e.name },
+    "card cards": { type: "list", get: (e) => e.cards },
+    "t type": { test: (e, t) => anyCard(e, (c) => typeLine(c).includes(t.val)) },
+    "o oracle": { test: (e, t) => anyCard(e, (c) => oracleText(c).includes(t.val)) },
+    // the deck's colors: c:ur has blue and red cards, c=r only red ones, c:c none colored
+    "c color colors": { test: (e, t) => {
+      const have = deckColors(e);
+      if (!have) return false;
+      const want = new Set([...(COLOR_WORDS[t.val] || t.val)].filter((x) => "wubrgc".includes(x)));
+      if (!want.size) return false;
+      if (want.has("c")) return have.size === 0;
+      const sub = (a, b) => [...a].every((x) => b.has(x));
+      const op = t.op === ":" ? ">=" : t.op;
+      return op === "=" ? sub(want, have) && sub(have, want) : op === ">=" ? sub(want, have) : op === "<=" ? sub(have, want)
+        : op === ">" ? sub(want, have) && have.size > want.size : sub(have, want) && have.size < want.size;
+    } },
+    "mv cmc": { test: (e, t) => !isNaN(parseFloat(t.val)) && anyCard(e, (c) => cmp(c.cmc, t.op === ":" ? "=" : t.op, parseFloat(t.val))) },
+    "lands": { type: "number", get: (e) => countCards(e, (c) => typeLine(c).includes("land")) },
+    "creatures": { type: "number", get: (e) => countCards(e, (c) => typeLine(c).includes("creature")) },
+    "spells": { type: "number", get: (e) => countCards(e, (c) => !typeLine(c).includes("land")) },
+    "notes": { type: "text", get: (e) => e.notes },
+    "added created": { type: "date", get: (e) => (e.created || "").slice(0, 10) },
+    "edited updated": { type: "date", get: (e) => (e.updated || "").slice(0, 10) },
+  },
+  has: {
+    notes: (e) => !!e.notes,
+    legal: (e) => e.problems.length === 0,
+    illegal: (e) => e.problems.length > 0,
+    in: (e) => !leftOut.has(e.name),
+    out: (e) => leftOut.has(e.name),
+  },
+});
+// ---- end entry search
+
 // ---- card name suggestions, and a preview of each card once its field matches one
 let suggestTimer;
 const slotInputs = [...document.querySelectorAll(".slots input")];
@@ -587,7 +875,9 @@ function saveLeftOut() {
 function updatePick() {
   const n = chosen().length;
   $("#pick").hidden = entryNames.length === 0;
-  $("#pick-count").textContent = `${n} of ${entryNames.length} entries in the tournament:`;
+  const shown = shownEntries().length;
+  $("#pick-count").textContent = `${n} of ${entryNames.length} entries in the tournament`
+    + (shown < entryNames.length ? ` · ${shown} shown:` : ":");
   for (const box of document.querySelectorAll("#entries input[type=checkbox]")) {
     box.checked = !leftOut.has(box.value);
     box.closest(".entry").classList.toggle("left-out", !box.checked);
@@ -600,8 +890,9 @@ function updatePick() {
   $("#stop").textContent = tournamentState === "stopping" ? "Stopping…" : "Stop";
 }
 
+// All / None apply to the entries the search shows.
 function pickAll(include) {
-  for (const n of entryNames) include ? leftOut.delete(n) : leftOut.add(n);
+  for (const n of shownEntries()) include ? leftOut.delete(n) : leftOut.add(n);
   saveLeftOut();
   updatePick();
 }
@@ -700,10 +991,11 @@ const legalities = (l) => `<div class="leggrid">${FORMATS.map(([key, label]) => 
 }).join("")}</div>`;
 
 const linkRow = (href) => `<div class="lbrow lblink"><a href="${esc(href)}" target="_blank" rel="noopener">Open on Scryfall ↗</a></div>`;
+const findRow = (name) => `<div class="lbrow lblink"><button type="button" class="lbfind" data-name="${esc(name)}">Entries with this card</button></div>`;
 
 function panelBasic(name, note) {
   return `<div class="lbrow lbtitle"><span class="lbname">${esc(name)}</span></div>`
-    + `<div class="lbrow lbloading">${esc(note)}</div>` + linkRow(scryfallSearch(name));
+    + `<div class="lbrow lbloading">${esc(note)}</div>` + linkRow(scryfallSearch(name)) + findRow(name);
 }
 
 // Split, flip, adventure and double-faced cards carry their rules text per face.
@@ -723,7 +1015,7 @@ function panelFull(c) {
   const artist = c.artist || faces?.[0].artist;
   if (artist) rows.push(`<div class="lbrow lbartist">Illustrated by ${esc(artist)}</div>`);
   if (c.legalities) rows.push(`<div class="lbrow">${legalities(c.legalities)}</div>`);
-  rows.push(linkRow(c.scryfall_uri || scryfallSearch(c.name)));
+  rows.push(linkRow(c.scryfall_uri || scryfallSearch(c.name)), findRow(lbCard || c.name));
   return rows.join("");
 }
 
@@ -805,11 +1097,20 @@ async function loadEntries() {
   const list = $("#entries");
   entryNames = data.map((e) => e.name);
   if (!data.length) {
+    entryData = [];
+    $("#entry-search-box").hidden = true;
     list.replaceChildren(el("li", { class: "empty" }, "No entries yet. Add the first one above."));
     updatePick();
     return;
   }
-  prefetchCards(data.flatMap((e) => e.cards));
+  entryData = data;
+  $("#entry-search-box").hidden = false;
+  const names = [...new Set(data.flatMap((e) => e.cards))];
+  prefetchCards(names);
+  // card terms (t:, c:, mv…) need each card's Scryfall data; filter again as it arrives
+  for (const n of names) {
+    if (!cardData.has(n)) fetchCard(n).then((c) => { cardData.set(n, c); refilterSoon(); }).catch(() => {});
+  }
   list.replaceChildren(...data.map((e) => {
     const illegal = e.problems.length > 0;
     const remove = el("button", { class: "remove", type: "button", "aria-label": "Remove " + e.name }, "Remove");
@@ -826,7 +1127,7 @@ async function loadEntries() {
     });
     const edit = el("button", { class: "remove", type: "button", "aria-label": "Edit " + e.name }, "Edit");
     edit.addEventListener("click", () => startEdit(e));
-    return el("li", { class: "entry" + (illegal ? " illegal" : "") + (editing === e.name ? " editing" : "") },
+    return el("li", { class: "entry" + (illegal ? " illegal" : "") + (editing === e.name ? " editing" : ""), "data-name": e.name },
       include,
       hand(e.cards),
       el("div", {}, el("div", { class: "entry-name" }, e.name),
@@ -835,7 +1136,7 @@ async function loadEntries() {
         el("div", { class: "entry-dates" }, entryDates(e))),
       el("div", { class: "entry-actions" }, edit, remove));
   }));
-  updatePick();
+  applyEntrySearch();
 }
 
 // ---- import: the server checks the text as it's typed (apply: false), then imports on the button
@@ -876,6 +1177,47 @@ $("#import-file").addEventListener("change", async (ev) => {
   checkImport();
 });
 $("#import-go").addEventListener("click", () => checkImport(true));
+
+// ---- the entry search box: filters the list, kept in the URL (?q=) so a search can be shared
+let entryData = [];
+const searchBox = $("#entry-search");
+searchBox.value = new URLSearchParams(location.search).get("q") || "";
+function shownEntries() {
+  const q = entrySearch.parse(searchBox.value);
+  return entryData.filter((e) => entrySearch.matches(e, q)).map((e) => e.name);
+}
+function applyEntrySearch() {
+  const shown = new Set(shownEntries());
+  for (const li of document.querySelectorAll("#entries li[data-name]")) li.hidden = !shown.has(li.dataset.name);
+  let none = $("#entries .no-match");
+  if (!shown.size && entryData.length) {
+    if (!none) $("#entries").append(none = el("li", { class: "empty no-match" }, "No entries match the search."));
+  } else none?.remove();
+  updatePick();
+}
+let refilterTimer;
+const refilterSoon = () => { clearTimeout(refilterTimer); refilterTimer = setTimeout(applyEntrySearch, 100); };
+searchBox.addEventListener("input", () => {
+  const url = new URL(location.href);
+  searchBox.value.trim() ? url.searchParams.set("q", searchBox.value) : url.searchParams.delete("q");
+  window.history.replaceState(null, "", url); // window.: the page's own `history` is the saved tournaments
+  applyEntrySearch();
+});
+// "/" jumps to the search box, unless you're typing somewhere
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, textarea, select") || !board.hidden || !lightbox.hidden) return;
+  e.preventDefault();
+  searchBox.focus();
+});
+// from the card view: the entries with this card
+panel.addEventListener("click", (e) => { const b = e.target.closest(".lbfind"); if (b) findEntriesWith(b.dataset.name); });
+function findEntriesWith(name) {
+  closeCard();
+  closeReplay();
+  searchBox.value = entrySearch.termFor("card", name);
+  searchBox.dispatchEvent(new Event("input"));
+  searchBox.scrollIntoView({ block: "center" });
+}
 
 // "Added Oct 25, 2026 · edited Oct 26, 2026"; files from before entries had dates show when they last changed
 const day = (iso) => new Date(iso).toLocaleDateString([], { dateStyle: "medium" });

@@ -63,7 +63,10 @@ was added and last edited (*Edit* changes its cards, name or notes); these are k
 ignores. *Import or export entries* (under the form) adds many entries from pasted text or a
 `.txt` file, with a preview of what each will do first, and saves every entry to one file in the
 same format: blank lines between entries, each a name (or `Name: ...`) followed by its cards and
-any `# notes:` lines. `./tcb tournament --from-file FILE` runs a field from such a file. Tick the entries to include to run a
+any `# notes:` lines. `./tcb tournament --from-file FILE` runs a field from such a file. The search box above the list
+filters the entries with Scryfall-style syntax (`t:creature -c:u`, `lands>=2`, `card="black lotus"`,
+`added>=2026-10`, `or` and parentheses; *Search syntax* lists it all), keeps the query in the URL,
+and the card view's *Entries with this card* searches for that card. Tick the entries to include to run a
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
 delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
