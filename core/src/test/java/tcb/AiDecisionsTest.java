@@ -104,6 +104,26 @@ class AiDecisionsTest {
         assertTrue(b.labels().stream().anyMatch(l -> l.contains("to B")), "trample damage to the player: " + b.labels());
     }
 
+    @Test
+    void storageCountersPayForSpells() {
+        // Fountain of Cho's "{T}, Remove any number of storage counters: Add {W} for each" pays
+        // for Chancellor of the Annex once it has 8 counters (issue #22). Forge's AI only used it
+        // as a ritual, so the spell never showed up as castable.
+        DeckList fountain = DeckList.of("fountain", "Chancellor of the Annex", "Fountain of Cho", "Island");
+        DeckList islands = DeckList.of("islands", "Island", "Island", "Island");
+        // play the Fountain, and store a counter on the opponent's turns so it's untapped on ours
+        Branch b = walkTo(fountain, islands, "priority", br -> {
+            for (int i = 0; i < br.labels().size(); i++) {
+                String l = br.labels().get(i);
+                if (l.startsWith("Play Fountain") || (l.contains("Put a storage counter") && br.turn() % 2 == 0)) {
+                    return i;
+                }
+            }
+            return br.labels().size() - 1;
+        }, l -> l.startsWith("Cast Chancellor of the Annex"));
+        assertTrue(b.turn() <= 19, "8 counters by A's 9th turn, cast on A's 10th: turn " + b.turn());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static int first(Branch b) {

@@ -180,6 +180,10 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   5. the AI's forced-attacker check runs in order on the game thread instead of on a thread pool
      with a timeout, so the attack the AI falls back to (more than 64 possible assignments) is the
      same on every replay.
+  6. the AI's mana payment counts a storage land's "remove X counters: add one mana for each"
+     (Fountain of Cho, Saprazzan Skerry...) when it checks whether a spell can be paid for, and
+     removes just the counters the cost needs. Stock Forge only used these as rituals, so the
+     spells they pay for never showed up as castable.
 
   The launchers run Java with `-XX:+DisableExplicitGC`: Forge calls `System.gc()` after every
   finished game, which stalls every solver thread.

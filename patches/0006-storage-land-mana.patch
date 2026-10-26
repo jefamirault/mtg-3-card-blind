@@ -1,0 +1,99 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ComputerUtilMana.java b/forge-ai/src/main/java/forge/ai/ComputerUtilMana.java
+index a9bc4f08..07090aee 100644
+--- a/forge-ai/src/main/java/forge/ai/ComputerUtilMana.java
++++ b/forge-ai/src/main/java/forge/ai/ComputerUtilMana.java
+@@ -352,7 +352,8 @@ public class ComputerUtilMana {
+                 continue;
+             }
+ 
+-            int amount = ma.hasParam("Amount") ? AbilityUtils.calculateAmount(ma.getHostCard(), ma.getParam("Amount"), ma) : 1;
++            int amount = isStorageManaAbility(ma) ? storageCounters(ma)
++                    : ma.hasParam("Amount") ? AbilityUtils.calculateAmount(ma.getHostCard(), ma.getParam("Amount"), ma) : 1;
+             if (amount <= 0) {
+                 // wrong gamestate for variable amount
+                 continue;
+@@ -772,6 +773,10 @@ public class ComputerUtilMana {
+                 continue;
+             }
+ 
++            if (isStorageManaAbility(saPayment)) {
++                chooseStorageX(saPayment, cost, ai);
++            }
++
+             final int manaCostToActivate = getGenericCostToActivate(saPayment);
+             if (!test && manaCostToActivate > 0) {
+                 // A Signet-like source is about to be activated: float the mana for its own cost first,
+@@ -810,6 +815,9 @@ public class ComputerUtilMana {
+             } else {
+                 final CostPayment pay = new CostPayment(saPayment.getPayCosts(), saPayment);
+                 if (!pay.payComputerCosts(new AiCostDecision(ai, saPayment, effect, true))) {
++                    if (isStorageManaAbility(saPayment)) {
++                        saPayment.setXManaCostPaid(null);
++                    }
+                     saList.remove(saPayment);
+                     continue;
+                 }
+@@ -817,6 +825,9 @@ public class ComputerUtilMana {
+                 ai.getGame().getStack().addAndUnfreeze(saPayment);
+                 // subtract mana from mana pool
+                 manapool.payManaFromAbility(sa, cost, saPayment);
++                if (isStorageManaAbility(saPayment)) {
++                    saPayment.setXManaCostPaid(null);
++                }
+ 
+                 if (hasConverge) {
+                     // hack to prevent converge re-using sources
+@@ -909,9 +920,41 @@ public class ComputerUtilMana {
+     private static void resetPayment(List<SpellAbility> payments) {
+         for (SpellAbility sa : payments) {
+             sa.getManaPart().clearExpressChoice();
++            if (isStorageManaAbility(sa)) {
++                sa.setXManaCostPaid(null);
++            }
+         }
+     }
+ 
++    /**
++     * A storage land's "Remove X counters from this: Add one mana for each counter removed" (Fountain
++     * of Cho, Saprazzan Skerry...), with no mana in its cost.
++     */
++    private static boolean isStorageManaAbility(final SpellAbility ma) {
++        final CostRemoveCounter remove = ma.getPayCosts().getCostPartByType(CostRemoveCounter.class);
++        return remove != null && remove.counter != null && remove.payCostFromSource() && "X".equals(remove.getAmount())
++                && "X".equals(ma.getParam("Amount")) && "Count$xPaid".equals(ma.getSVar("X"))
++                && ma.getManaPart() != null && !ma.getManaPart().isComboMana() && !ma.getPayCosts().hasManaCost();
++    }
++
++    /** The counters a storage mana ability can remove: the most mana it can add. */
++    private static int storageCounters(final SpellAbility ma) {
++        return ma.getHostCard().getCounters(ma.getPayCosts().getCostPartByType(CostRemoveCounter.class).counter);
++    }
++
++    /** Sets X to the counters the rest of the cost needs, at most the counters there are, so none are wasted. */
++    private static void chooseStorageX(final SpellAbility ma, final ManaCostBeingPaid cost, final Player ai) {
++        final int counters = storageCounters(ma);
++        ma.setXManaCostPaid(1);
++        final String one = GameActionUtil.generatedTotalMana(ma);
++        final ManaCostBeingPaid rest = new ManaCostBeingPaid(cost);
++        int x = 0;
++        while (x < counters && !one.isEmpty() && payMultipleMana(rest, one, ai) == null) {
++            x++;
++        }
++        ma.setXManaCostPaid(x);
++    }
++
+     /**
+      * Before a filter mana ability (e.g. Arcane Signet) is activated for real, tap ordinary sources
+      * for the generic mana it costs so that mana is floating when the ability's own cost gets paid.
+@@ -1852,6 +1895,11 @@ public class ComputerUtilMana {
+                 continue;
+             }
+ 
++            // a storage land with no counters adds nothing
++            if (isStorageManaAbility(a) && storageCounters(a) == 0) {
++                continue;
++            }
++
+             if (!res.contains(a)) {
+                 if (cost.isReusuableResource() && !cost.hasManaCost()) {
+                     res.add(0, a);
