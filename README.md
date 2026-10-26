@@ -60,7 +60,10 @@ field: `./tcb tournament entries`. The first time it runs (no `--entries` folder
 the folder with the sample decks in `examples/entries`. An entry can have notes, and shows when it
 was added and last edited (*Edit* changes its cards, name or notes); these are kept as
 `# created:` / `# updated:` / `# notes:` comment lines at the top of its deck file, which the CLI
-ignores. Tick the entries to include to run a
+ignores. *Import or export entries* (under the form) adds many entries from pasted text or a
+`.txt` file, with a preview of what each will do first, and saves every entry to one file in the
+same format: blank lines between entries, each a name (or `Name: ...`) followed by its cards and
+any `# notes:` lines. `./tcb tournament --from-file FILE` runs a field from such a file. Tick the entries to include to run a
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
 delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn

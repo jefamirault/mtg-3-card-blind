@@ -15,6 +15,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -38,6 +39,7 @@ import forge.item.PaperCard;
 import forge.model.FModel;
 import tcb.deck.DeckList;
 import tcb.deck.EntryFile;
+import tcb.deck.EntryImport;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
 import tcb.engine.NondeterministicReplayException;
@@ -167,6 +169,10 @@ public final class WebServer {
                 sendJson(ex, 200, searchCards(query(ex).getOrDefault("q", "")));
             } else if (path.equals("/api/entries") && method.equals("GET")) {
                 sendJson(ex, 200, listEntries());
+            } else if (path.equals("/api/entries/import") && method.equals("POST")) {
+                importEntries(ex);
+            } else if (path.equals("/api/entries/export") && method.equals("GET")) {
+                exportEntries(ex);
             } else if (path.equals("/api/entries") && method.equals("POST")) {
                 saveEntry(ex, null);
             } else if (path.startsWith("/api/entries/") && method.equals("PUT")) {
@@ -303,6 +309,71 @@ public final class WebServer {
             Files.delete(old);
         }
         sendJson(ex, original == null ? 201 : 200, Map.of("name", name, "cards", cards));
+    }
+
+    /**
+     * Imports entries from text (see EntryImport). The body has {@code text}, {@code apply} (false
+     * only checks) and {@code replace} (overwrite entries with the same name; otherwise they're
+     * skipped). Each entry is checked and imported on its own: one bad block doesn't stop the rest.
+     */
+    private void importEntries(HttpExchange ex) throws IOException {
+        JsonObject body = GSON.fromJson(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8), JsonObject.class);
+        String text = body != null && body.has("text") ? body.get("text").getAsString() : "";
+        boolean apply = body != null && body.has("apply") && body.get("apply").getAsBoolean();
+        boolean replace = body != null && body.has("replace") && body.get("replace").getAsBoolean();
+        List<Map<String, Object>> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        int imported = 0;
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        for (EntryImport.Block b : EntryImport.parse(text)) {
+            List<String> problems = new ArrayList<>(b.problems());
+            if (!validName(b.name())) {
+                problems.add("The name has to be letters, digits, spaces, - _ or ' (up to " + MAX_NAME + " characters).");
+            }
+            if (!seen.add(b.name())) {
+                problems.add("Another entry in this import has the same name.");
+            }
+            if (b.notes().length() > MAX_NOTES) {
+                problems.add("The notes are over " + MAX_NOTES + " characters.");
+            }
+            DeckList deck = new DeckList(b.name(), b.cards());
+            if (problems.isEmpty()) {
+                problems.addAll(VintageValidator.problems(deck));
+            }
+            boolean exists = validName(b.name()) && Files.exists(entryFile(b.name()));
+            String result = !problems.isEmpty() ? "invalid" : exists && !replace ? "skipped" : exists ? "replaced" : "added";
+            if (apply && problems.isEmpty() && (!exists || replace)) {
+                Instant created = exists ? EntryFile.read(entryFile(b.name())).created() : now;
+                new EntryFile(deck, created, now, b.notes()).write(entryFile(b.name()));
+                imported++;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", b.name());
+            m.put("cards", b.cards());
+            m.put("notes", b.notes());
+            m.put("problems", problems);
+            m.put("exists", exists);
+            m.put("result", result);
+            out.add(m);
+        }
+        sendJson(ex, 200, Map.of("entries", out, "imported", imported, "applied", apply));
+    }
+
+    /** Every entry in the import format, as a file to save. */
+    private void exportEntries(HttpExchange ex) throws IOException {
+        List<EntryFile> entries = new ArrayList<>();
+        try (Stream<Path> files = Files.list(entriesDir)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".txt")).sorted().toList()) {
+                entries.add(EntryFile.read(f));
+            }
+        }
+        byte[] bytes = EntryImport.export(entries).getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"3cb-entries.txt\"");
+        ex.sendResponseHeaders(200, bytes.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(bytes);
+        }
     }
 
     private static boolean validName(String name) {

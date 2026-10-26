@@ -20,6 +20,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import tcb.deck.DeckList;
+import tcb.deck.EntryImport;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
 import tcb.solve.Solver;
@@ -150,8 +151,11 @@ public final class Main {
 
     @Command(name = "tournament", description = "Run a 3CB round robin over deck files and print the matchup matrix and standings.")
     static class TournamentCmd implements Callable<Integer> {
-        @Parameters(arity = "1..*", paramLabel = "DECKS", description = "Deck files or directories of .txt decks")
-        List<Path> paths;
+        @Parameters(arity = "0..*", paramLabel = "DECKS", description = "Deck files or directories of .txt decks")
+        List<Path> paths = List.of();
+
+        @Option(names = "--from-file", paramLabel = "FILE", description = "A file of many entries, blank lines between them, each a name and its cards (the web UI's import/export format). Repeatable.")
+        List<Path> entryFiles = List.of();
 
         @Option(names = "--threads", description = "Parallel games. Default: number of CPUs")
         int threads = Runtime.getRuntime().availableProcessors();
@@ -174,6 +178,14 @@ public final class Main {
             List<DeckList> entries = new ArrayList<>();
             for (Path file : deckFiles(paths)) {
                 entries.add(DeckList.read(file));
+            }
+            for (Path file : entryFiles) {
+                for (EntryImport.Block b : EntryImport.parse(Files.readString(file))) {
+                    if (!b.problems().isEmpty()) {
+                        throw new IllegalArgumentException(file + ", entry " + b.name() + ": " + String.join("; ", b.problems()));
+                    }
+                    entries.add(new DeckList(b.name(), b.cards()));
+                }
             }
             if (entries.size() < 2) {
                 OUT.println("Need at least two decks.");

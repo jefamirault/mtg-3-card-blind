@@ -114,7 +114,21 @@
     width: 100%; min-height: 3.6rem; padding: .45rem .6rem; background: var(--stock); resize: vertical;
     border: 1px solid var(--rule); border-radius: 3px; font: inherit; color: inherit;
   }
-  .form-buttons { display: flex; gap: .8rem; align-items: center; }
+  .form-buttons { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .import { margin: -1rem 0 1.6rem; border: 0; }
+  .import > summary { padding: 0; color: var(--action); font-size: .9rem; display: list-item; }
+  .import-body { display: grid; gap: .55rem; margin-top: .6rem; }
+  .import-body textarea { min-height: 9rem; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: .85rem; }
+  .import-body .hint { font-size: .82rem; color: var(--ink-soft); margin: 0; }
+  .import-list { list-style: none; margin: 0; padding: 0; font-size: .88rem; }
+  .import-list li { padding: .3rem 0; border-top: 1px dotted var(--rule); display: flex; flex-wrap: wrap; gap: .1rem .6rem; align-items: baseline; }
+  .import-list .cards { color: var(--ink-soft); }
+  .import-list .what { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .import-list .added .what { color: var(--win); } .import-list .replaced .what { color: var(--action); }
+  .import-list .skipped .what, .import-list .invalid .what { color: var(--loss); }
+  .import-list .why { flex-basis: 100%; color: var(--loss); font-size: .82rem; }
+  .import-body label.check { display: flex; gap: .4rem; align-items: center; color: var(--ink); }
+  a.export { font-size: .88rem; color: var(--action); }
   .editing-note { margin: 0; font-size: .9rem; color: var(--action); font-weight: 600; }
   .remove {
     border: 0; background: none; color: var(--ink-soft); cursor: pointer; padding: .2rem .4rem; font-size: .9rem;
@@ -425,6 +439,20 @@
         <button class="remove" type="button" id="edit-cancel" hidden>Cancel</button>
       </div>
     </form>
+    <details class="import" id="import">
+      <summary>Import or export entries</summary>
+      <div class="import-body">
+        <p class="hint">Paste entries, or open a text file. Put a blank line between entries; each starts with its name, then one card per line (<code>2 Mountain</code> works). <code># notes:</code> lines become the entry's notes.</p>
+        <textarea id="import-text" aria-label="Entries to import" spellcheck="false" placeholder="Sligh&#10;2 Mountain&#10;Goblin Guide&#10;&#10;Lotus storm&#10;3 Black Lotus"></textarea>
+        <input type="file" id="import-file" accept=".txt,text/plain" aria-label="Open a text file of entries">
+        <label class="check"><input type="checkbox" id="import-replace"> Replace entries that have the same name</label>
+        <ul class="import-list" id="import-list" aria-live="polite"></ul>
+        <div class="form-buttons">
+          <button class="primary" type="button" id="import-go" disabled>Import</button>
+          <a class="export" href="/api/entries/export" download>Export all entries</a>
+        </div>
+      </div>
+    </details>
     <p class="pick" id="pick" hidden><span id="pick-count"></span>
       <button type="button" id="pick-all">All</button><button type="button" id="pick-none">None</button></p>
     <ul class="entries" id="entries"></ul>
@@ -809,6 +837,45 @@ async function loadEntries() {
   }));
   updatePick();
 }
+
+// ---- import: the server checks the text as it's typed (apply: false), then imports on the button
+let importTimer;
+async function checkImport(apply = false) {
+  const text = $("#import-text").value;
+  const go = $("#import-go");
+  if (!text.trim()) { $("#import-list").replaceChildren(); go.disabled = true; go.textContent = "Import"; return; }
+  const { ok, data } = await api("POST", "/api/entries/import", { text, apply, replace: $("#import-replace").checked });
+  if (!ok) { showProblems($("#import-list"), [data.error || "Couldn't read the entries."]); return; }
+  if (text !== $("#import-text").value) return; // changed meanwhile; a newer check is coming
+  const labels = apply
+    ? { added: "added", replaced: "replaced", skipped: "skipped: name taken", invalid: "not imported" }
+    : { added: "new", replaced: "replaces existing", skipped: "skipped: name taken", invalid: "can't import" };
+  $("#import-list").replaceChildren(...data.entries.map((e) => el("li", { class: e.result },
+    el("span", { class: "what" }, labels[e.result]),
+    el("strong", {}, e.name),
+    el("span", { class: "cards" }, e.cards.join(", ")),
+    e.problems.length ? el("span", { class: "why" }, e.problems.join("; ")) : null)));
+  const ready = data.entries.filter((e) => e.result === "added" || e.result === "replaced").length;
+  if (apply) {
+    go.disabled = true;
+    go.textContent = `Imported ${data.imported} ${data.imported === 1 ? "entry" : "entries"}`;
+    $("#import-text").value = "";
+    loadEntries();
+  } else {
+    go.disabled = ready === 0;
+    go.textContent = ready ? `Import ${ready} ${ready === 1 ? "entry" : "entries"}` : "Import";
+  }
+}
+$("#import-text").addEventListener("input", () => { clearTimeout(importTimer); importTimer = setTimeout(checkImport, 300); });
+$("#import-replace").addEventListener("change", () => checkImport());
+$("#import-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  $("#import-text").value = await file.text();
+  ev.target.value = "";
+  checkImport();
+});
+$("#import-go").addEventListener("click", () => checkImport(true));
 
 // "Added Oct 25, 2026 · edited Oct 26, 2026"; files from before entries had dates show when they last changed
 const day = (iso) => new Date(iso).toLocaleDateString([], { dateStyle: "medium" });
