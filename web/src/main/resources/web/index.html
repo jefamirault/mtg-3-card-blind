@@ -91,6 +91,9 @@
     border: 1px solid var(--rule); border-radius: 3px;
   }
   .slots { display: grid; gap: .4rem; }
+  /* the cards as they're filled in: art once a field matches a card, the slot number until then */
+  .hand.preview { padding: .5rem 0 .4rem 1.2rem; min-height: calc(var(--card-w) * 88 / 63 + .9rem); }
+  .card.slot { display: grid; place-items: center; border-style: dashed; background: none; color: var(--ink-soft); font-size: 1.1rem; box-shadow: none; }
   .problems { margin: 0; padding-left: 1.1rem; color: var(--loss); font-size: .9rem; }
   form .primary { justify-self: start; margin-top: .3rem; }
 
@@ -400,6 +403,7 @@
         <input type="text" id="c2" list="card-names" aria-label="Second card" required>
         <input type="text" id="c3" list="card-names" aria-label="Third card" required>
       </div>
+      <div class="hand preview" id="add-preview" aria-label="The cards as you've entered them"></div>
       <datalist id="card-names"></datalist>
       <ul class="problems" id="add-problems" aria-live="polite"></ul>
       <button class="primary" type="submit">Add entry</button>
@@ -473,18 +477,53 @@ async function api(method, path, body) {
   return { ok: res.ok, data };
 }
 
-// ---- card name suggestions
+// ---- card name suggestions, and a preview of each card once its field matches one
 let suggestTimer;
-for (const input of document.querySelectorAll(".slots input")) {
+const slotInputs = [...document.querySelectorAll(".slots input")];
+const slotCards = [null, null, null]; // the card name each field matches, or null
+for (const [i, input] of slotInputs.entries()) {
   input.addEventListener("input", () => {
     clearTimeout(suggestTimer);
     suggestTimer = setTimeout(async () => {
-      if (input.value.trim().length < 2) return;
-      const { data } = await api("GET", "/api/cards?q=" + encodeURIComponent(input.value));
+      const typed = input.value.trim();
+      if (typed.length < 2) { matchSlot(i, null); return; }
+      const { data } = await api("GET", "/api/cards?q=" + encodeURIComponent(typed));
+      if (input.value.trim() !== typed) return; // typed on meanwhile
       $("#card-names").replaceChildren(...(data || []).map((n) => el("option", { value: n })));
+      // the best suggestion comes first, and an exact match is always the best
+      const exact = (data || []).find((n) => n.toLowerCase() === typed.toLowerCase());
+      matchSlot(i, exact || null);
     }, 150);
   });
+  // a match typed in other capitals gets the card's own spelling
+  input.addEventListener("change", () => { if (slotCards[i] && input.value.trim() !== slotCards[i]) input.value = slotCards[i]; });
 }
+
+function matchSlot(i, name) {
+  if (slotCards[i] === name) return;
+  slotCards[i] = name;
+  renderPreview();
+}
+
+function renderPreview() {
+  const names = slotCards.filter(Boolean);
+  $("#add-preview").replaceChildren(...slotCards.map((name, i) => {
+    if (!name) return el("span", { class: "card slot", "aria-hidden": "true" }, String(i + 1));
+    const card = el("button", { class: "card", type: "button", title: "Show " + name }, el("span", { class: "card-name" }, name));
+    const at = slotCards.slice(0, i).filter(Boolean).length; // its place among the matched cards
+    card.addEventListener("click", () => openCard(name, names, at));
+    fetchCard(name).then((data) => {
+      if (slotCards[i] !== name) return;
+      const src = (data.image_uris || data.card_faces?.[0]?.image_uris)?.small;
+      if (!src) return;
+      const art = el("img", { class: "card-art", src, alt: "" });
+      art.addEventListener("load", () => art.classList.add("loaded"));
+      card.append(art);
+    }).catch(() => {}); // the name stays
+    return card;
+  }));
+}
+renderPreview();
 
 // ---- entries
 // Entries left out of the next tournament. Remembering the left-out ones (not the chosen ones)
@@ -755,6 +794,8 @@ $("#add").addEventListener("submit", async (ev) => {
   if (!ok) { showProblems($("#add-problems"), data.problems || [data.error]); return; }
   showProblems($("#add-problems"), []);
   ev.target.reset();
+  slotCards.fill(null);
+  renderPreview();
   $("#name").focus();
   loadEntries();
 });
