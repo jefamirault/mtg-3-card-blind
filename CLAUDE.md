@@ -5,14 +5,27 @@ it safely.
 
 ## Build and test
 
-- `mise exec -- mvn -B -q -o install -DskipTests` rebuilds this project in seconds (offline is fine
-  once `./build.sh` has run). `./tcb` and `./tcb-web` run the jars in `cli/target` and
-  `web/target`, so rebuild before running them.
-- Don't rebuild while a `./tcb` or `./tcb-web` process is running: it replaces the jars under it.
-  `./build.sh` refuses to (FORCE=1 overrides); the user restarts the web UI with
-  `./local_server.sh restart`. `./build.sh` skips Forge unless `forge/` changed (`--full` forces).
-- Tests: `mise exec -- mvn -B -o test -pl core` (about 3 minutes; `ReductionsTest` is most of it).
+- Rebuild with `./build.sh`. It skips Forge unless `forge/` changed (`--full` forces), and refuses
+  while `./local_server.sh`, `./tcb-web` or `./tcb` runs from this checkout, since the build
+  replaces the jars under them (FORCE=1 overrides; don't use it unasked). Raw
+  `mvn install` has no such guard. The user restarts the web UI with `./local_server.sh restart`,
+  which rebuilds first if sources changed.
+- `mvn compile` and `mvn test` only write `*/target/classes`, so they're safe while the server
+  runs. To try a change then, run a second server from the classes (they win over the jars in
+  `lib/`): `java -Xss512m -Dtcb.forgeGuiDir=$PWD/forge/forge-gui -cp
+  "web/target/classes:core/target/classes:web/target/lib/*" tcb.web.WebServer --port 8099
+  --entries <scratch> --history <scratch> --no-cache`.
+- Tests: `mise exec -- mvn -B -o test -pl core` (about 4 minutes; `ReductionsTest` is most of it).
   Run one class with `-Dtest=AiDecisionsTest`.
+- Web UI checks: the headless shell can't click, so serve `index.html` from source with a script
+  injected (a small proxy that passes `/api` through to the test server) and screenshot that. Use
+  a tall `--window-size` instead of `scrollIntoView`, which garbles headless screenshots. Read the
+  console with `--enable-logging=stderr --v=0 --dump-dom`.
+- In `index.html`, a top-level `let history` holds the saved tournaments and hides the browser's
+  `history`, so use `window.history`.
+- The entry search block in `index.html` (between `// ---- entry search` and
+  `// ---- end entry search`) has no DOM access on purpose: extract it and test queries in Node.
+- Commits: one per issue, `resolves #N: <issue title>`. The user pushes.
 - The `forge/` submodule always shows as modified (`m forge`): `build.sh` applies `patches/*.patch`
   to its working tree. That's expected; never commit the submodule pointer for it.
 
@@ -41,6 +54,24 @@ it safely.
   `ReductionsTest`. `Equivalence` is deliberately conservative: when unsure, keep a card's id.
 - A paused game (`Continuation`) must be resumed or abandoned. `Solver.search` abandons them in a
   `finally` block.
+- Watching a search must not change it. The live search line (`Solver.progress`) and tree
+  recording (`SearchTree`) are passive; `SolverTest.recordsTheSearchedTree` checks the node count
+  is unchanged.
+- **Turns:** the solver, `Options.maxTurns` and `GameResult.provenTurnLimit` count Forge turns
+  (each player's turn). Everything shown counts turn cycles from 1, converted with `Turns`, so a
+  shown limit of 25 is `maxTurns` 50. Web options JSON has `turns` (cycles). History saved before
+  this change has `maxTurns` (Forge turns), and the UI converts it.
+
+## Saved formats (changing them breaks existing files)
+
+- Trace lines (`"<A|B|Chance> <kind>: <label>"`) are saved as each game's optimal line, and
+  "Watch the game" replays them by matching the text (`DecisionTape.following`). Changing option
+  labels makes older saved games unreplayable (the server answers 409 for them).
+- Entry files: deck file syntax plus `# created:` / `# updated:` / `# notes:` comment lines at the
+  top (`EntryFile`); `DeckList` ignores comments, so the CLI still reads them. The import/export
+  format (`EntryImport`) is blank-line-separated blocks: a name, then cards.
+- History: `history/<id>.json`, plus `history/<id>.trees/<k>.json.gz` (gzipped `SearchTree` JSON
+  for the k-th game, served as-is) when trees were saved.
 
 ## Checking a change
 
