@@ -94,6 +94,9 @@
   /* the cards as they're filled in: art once a field matches a card, the slot number until then */
   .hand.preview { padding: .5rem 0 .4rem 1.2rem; min-height: calc(var(--card-w) * 88 / 63 + .9rem); }
   .card.slot { display: grid; place-items: center; border-style: dashed; background: none; color: var(--ink-soft); font-size: 1.1rem; box-shadow: none; }
+  .name-suggestions { margin: .1rem 0 0; font-size: .85rem; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: baseline; }
+  .name-suggestions button { border: 1px solid var(--rule); border-radius: 3px; background: var(--stock); color: var(--action); cursor: pointer; padding: .1rem .45rem; font: inherit; }
+  .name-suggestions button:hover { border-color: var(--action); }
   .problems { margin: 0; padding-left: 1.1rem; color: var(--loss); font-size: .9rem; }
   form .primary { justify-self: start; margin-top: .3rem; }
   .form-buttons .primary { margin-top: 0; }
@@ -482,7 +485,8 @@
     <form id="add" autocomplete="off">
       <p class="editing-note" id="editing-note" hidden></p>
       <label for="name">Entry name</label>
-      <input type="text" id="name" name="name" maxlength="40" required>
+      <input type="text" id="name" name="name" maxlength="40" aria-describedby="name-suggestions">
+      <p class="name-suggestions" id="name-suggestions" hidden></p>
       <label for="c1">Cards</label>
       <div class="slots">
         <input type="text" id="c1" list="card-names" aria-label="First card" required>
@@ -892,7 +896,48 @@ function matchSlot(i, name) {
   if (slotCards[i] === name) return;
   slotCards[i] = name;
   renderPreview();
+  renderNameSuggestions();
 }
+
+// ---- names suggested from the cards, for an entry with no name yet
+// A card's letters and digits only (Æ as Ae, accents dropped), as EntryImport.nameFrom takes them.
+const nameLetters = (card) => card.replace(/Æ/g, "Ae").replace(/æ/g, "ae").normalize("NFD").replace(/[^A-Za-z0-9]/g, "");
+// Cards in alphabetical order, every copy counted: the first 4 letters of each (the name an import
+// gives), then the first 2 and last 2 of each.
+function suggestedNames(cards) {
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const words = cards.map(nameLetters).filter(Boolean)
+    .sort((a, b) => cmp(a.toLowerCase(), b.toLowerCase()) || cmp(a, b));
+  if (words.length === 0) return [];
+  const names = [
+    words.map((w) => w.slice(0, 4)).join(""),
+    words.map((w) => (w.length <= 4 ? w : w.slice(0, 2) + w.slice(-2))).join(""),
+  ];
+  return [...new Set(names)];
+}
+// The name, or "name 2", "name 3"... when another entry has it.
+function freeName(name) {
+  const taken = new Set(entryNames.filter((n) => n !== editing).map((n) => n.toLowerCase()));
+  let free = name;
+  for (let n = 2; taken.has(free.toLowerCase()); n++) free = name + " " + n;
+  return free;
+}
+function renderNameSuggestions() {
+  const box = $("#name-suggestions");
+  const names = $("#name").value.trim() === "" && slotCards.every(Boolean) ? suggestedNames(slotCards).map(freeName) : [];
+  box.hidden = names.length === 0;
+  box.replaceChildren(...(names.length ? ["Suggested names:"] : []), ...names.map((n) => {
+    const b = el("button", { type: "button", title: "Name the entry " + n }, n);
+    b.addEventListener("click", () => {
+      $("#name").value = n;
+      renderNameSuggestions();
+      showProblems($("#add-problems"), []);
+      $("#add-submit").focus();
+    });
+    return b;
+  }));
+}
+$("#name").addEventListener("input", renderNameSuggestions);
 
 function renderPreview() {
   const names = slotCards.filter(Boolean);
@@ -1151,6 +1196,7 @@ async function loadEntries() {
   const { data } = await api("GET", "/api/entries");
   const list = $("#entries");
   entryNames = data.map((e) => e.name);
+  renderNameSuggestions(); // a suggestion may be taken now
   if (!data.length) {
     entryData = [];
     $("#entry-search-box").hidden = true;
@@ -1289,7 +1335,7 @@ function startEdit(e) {
   for (const [i, input] of slotInputs.entries()) input.value = e.cards[i] || "";
   $("#notes").value = e.notes || "";
   slotCards.splice(0, 3, ...[0, 1, 2].map((i) => e.cards[i] || null));
-  renderPreview();
+  renderPreview(); renderNameSuggestions();
   $("#editing-note").textContent = "Editing " + e.name;
   $("#editing-note").hidden = false;
   $("#add-submit").textContent = "Save changes";
@@ -1303,7 +1349,7 @@ function endEdit() {
   editing = null;
   $("#add").reset();
   slotCards.fill(null);
-  renderPreview();
+  renderPreview(); renderNameSuggestions();
   $("#editing-note").hidden = true;
   $("#add-submit").textContent = "Add entry";
   $("#edit-cancel").hidden = true;
@@ -1315,6 +1361,14 @@ $("#add").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const cards = ["#c1", "#c2", "#c3"].map((s) => $(s).value.trim());
   const body = { name: $("#name").value.trim(), cards, notes: $("#notes").value };
+  if (!body.name) {
+    renderNameSuggestions();
+    showProblems($("#add-problems"), [$("#name-suggestions").hidden
+      ? "Name the entry."
+      : "Name the entry: pick a suggested name or type one."]);
+    $("#name").focus();
+    return;
+  }
   const { ok, data } = editing
     ? await api("PUT", "/api/entries/" + encodeURIComponent(editing), body)
     : await api("POST", "/api/entries", body);

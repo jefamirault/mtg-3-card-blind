@@ -1,7 +1,8 @@
 package tcb.deck;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -121,28 +122,28 @@ public final class EntryImport {
         }
     }
 
+    /** Characters of each card that go into a name made from the cards. */
+    static final int NAME_PART = 4;
+
     /**
-     * "Goblin Guide - Mountain": a name for an unnamed block, in the characters names allow. Cards
-     * that don't fit in {@link #MAX_NAME} are left out whole; a first card that's too long on its
-     * own is cut at a word.
+     * "GoblMounMoun" for Goblin Guide, Mountain, Mountain: a name for an unnamed block, the first
+     * {@value #NAME_PART} letters and digits of each card (Æ as Ae, accents dropped), in
+     * alphabetical order. Every copy counts, so the same cards give the same name whatever order
+     * they're written in. The web form suggests the same name first ({@code suggestedNames}).
      */
     static String nameFrom(List<String> cards) {
-        String name = "";
-        for (String card : new LinkedHashSet<>(cards)) {
-            String part = card.replaceAll("[^A-Za-z0-9 _'-]", "").replaceAll("\\s+", " ").strip();
-            if (name.isEmpty()) {
-                part = part.replaceAll("^[^A-Za-z0-9]+", "");
-            }
-            if (part.isEmpty()) {
-                continue;
-            }
-            String longer = name.isEmpty() ? part : name + " - " + part;
-            if (longer.length() <= MAX_NAME) {
-                name = longer;
-            } else if (name.isEmpty()) {
-                name = cutAtWord(part, MAX_NAME);
-            }
+        List<String> words = new ArrayList<>();
+        for (String card : cards) {
+            words.add(Normalizer.normalize(card.replace("Æ", "Ae").replace("æ", "ae"), Normalizer.Form.NFD)
+                    .replaceAll("[^A-Za-z0-9]", ""));
         }
+        words.sort(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()));
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            sb.append(w, 0, Math.min(NAME_PART, w.length()));
+        }
+        String name = sb.toString();
+        name = name.length() > MAX_NAME ? name.substring(0, MAX_NAME) : name;
         return name.isEmpty() ? "Imported entry" : name;
     }
 

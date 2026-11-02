@@ -43,21 +43,24 @@ class EntryImportTest {
     @Test
     void aBlockOfCardsGetsANameFromThem() {
         Block b = EntryImport.parse("Goblin Guide\nMountain\nMountain\n").get(0);
-        assertEquals("Goblin Guide - Mountain", b.name());
+        assertEquals("GoblMounMoun", b.name());
         assertEquals(List.of("Goblin Guide", "Mountain", "Mountain"), b.cards());
         assertTrue(b.generated());
+        assertEquals("ChalChanFoun",
+                EntryImport.parse("Chancellor of the Annex\nFountain of Cho\nChalice of the Void\n").get(0).name());
     }
 
     @Test
-    void longCardNamesAreLeftOutWholeNotCutMidWord() {
-        // "Chancellor of the Annex - Fountain of Cho" is 41 characters, one over the limit
-        Block b = EntryImport.parse("Chancellor of the Annex\nFountain of Cho\nChalice of the Void\n").get(0);
-        assertEquals("Chancellor of the Annex", b.name());
-        assertEquals("Leyline of Anticipation - Vryn Wingmare",
-                EntryImport.parse("Leyline of Anticipation\nVryn Wingmare\nBlack Lotus\n").get(0).name());
-        // a later card that fits still goes in
-        assertEquals("Ulamog the Infinite Gyre - Island",
-                EntryImport.parse("Ulamog, the Infinite Gyre\nEmrakul, the Aeons Torn\nIsland\n").get(0).name());
+    void generatedNamesDontDependOnCardOrder() {
+        assertEquals("PlaiPlaiSwor", EntryImport.parse("Swords to Plowshares\n2 Plains\n").get(0).name());
+        assertEquals("PlaiPlaiSwor", EntryImport.parse("Plains\nSwords to Plowshares\nPlains\n").get(0).name());
+    }
+
+    @Test
+    void generatedNamesSkipPunctuationAndSpaces() {
+        // "Ulamog, the Infinite Gyre" loses its comma; "Ice Cauldron" its space
+        assertEquals("IceCIslaUlam",
+                EntryImport.parse("Ulamog, the Infinite Gyre\nIsland\nIce Cauldron\n").get(0).name());
     }
 
     @Test
