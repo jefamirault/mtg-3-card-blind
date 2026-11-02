@@ -16,15 +16,22 @@ it safely.
   "web/target/classes:core/target/classes:web/target/lib/*" tcb.web.WebServer --port 8099
   --entries <scratch> --history <scratch> --no-cache`.
 - Tests: `mise exec -- mvn -B -o test -pl core` (about 4 minutes; `ReductionsTest` is most of it).
-  Run one class with `-Dtest=AiDecisionsTest`.
+  Run one class with `-Dtest=AiDecisionsTest`. With a fresh `~/.m2`, run it once without `-o`:
+  `build.sh` skips tests, so it never fetches the surefire JUnit provider. If mise says the config
+  isn't trusted (after moving the checkout), the user runs `mise trust` on `mise.toml`.
 - Web UI checks: the headless shell can't click, so serve `index.html` from source with a script
   injected (a small proxy that passes `/api` through to the test server) and screenshot that. Use
   a tall `--window-size` instead of `scrollIntoView`, which garbles headless screenshots. Read the
   console with `--enable-logging=stderr --v=0 --dump-dom`.
+- To drive the form from an injected script, space the card fields' `input` events about 600 ms
+  apart: the three fields share one debounce timer, so filling them at once only matches the last.
+  If the proxy points at the user's running server, pass only GETs through so nothing is saved.
 - In `index.html`, a top-level `let history` holds the saved tournaments and hides the browser's
   `history`, so use `window.history`.
 - The entry search block in `index.html` (between `// ---- entry search` and
   `// ---- end entry search`) has no DOM access on purpose: extract it and test queries in Node.
+- Names made from cards: `EntryImport.nameFrom` (import) and `suggestedNames` in `index.html` (the
+  entry form) must agree: the form's first suggestion is the name an import gives.
 - Commits: one per issue, `resolves #N: <issue title>`. The user pushes.
 - The `forge/` submodule always shows as modified (`m forge`): `build.sh` applies `patches/*.patch`
   to its working tree. That's expected; never commit the submodule pointer for it.
