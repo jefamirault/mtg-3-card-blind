@@ -272,6 +272,10 @@
   .bd-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; padding: .4rem 1rem .8rem; }
   .bd-controls button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); color: #E9EDF3; border-radius: 3px; min-width: 2.4rem; padding: .25rem .5rem; cursor: pointer; }
   .bd-controls button:hover { background: rgba(255, 255, 255, .15); }
+  .bd-controls button svg { width: 1rem; height: 1rem; display: block; margin: auto; fill: currentColor; }
+  .bd-controls button svg .chev { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .bd-play .i-pause, .bd-play.playing .i-play { display: none; }
+  .bd-play.playing .i-pause { display: block; }
   .bd-controls input[type=range] { flex: 1 1 12rem; accent-color: #FFD37A; }
   .bd-controls label { font-size: .85rem; color: #B9C3D1; display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
   .bd-controls select { font: inherit; font-size: .85rem; }
@@ -578,10 +582,11 @@
   <div class="bd-table"></div>
   <p class="bd-caption" aria-live="polite"></p>
   <div class="bd-controls">
-    <button type="button" class="bd-first" aria-label="First step" title="First step (Home)">|◀</button>
-    <button type="button" class="bd-prev" aria-label="Previous step" title="Previous step (←)">◀</button>
-    <button type="button" class="bd-play" aria-label="Play" title="Play / pause (space)">▶</button>
-    <button type="button" class="bd-next" aria-label="Next step" title="Next step (→)">▶|</button>
+    <button type="button" class="bd-first" aria-label="First step" title="First step (Home)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="2" height="10"/><path d="M13 3v10L5.5 8z"/></svg></button>
+    <button type="button" class="bd-prev" aria-label="Previous step" title="Previous step (←)"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="chev" d="M10 3L5 8l5 5"/></svg></button>
+    <button type="button" class="bd-play" aria-label="Play" title="Play / pause (space)"><svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11L13 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10"/><rect x="9" y="3" width="3" height="10"/></svg></button>
+    <button type="button" class="bd-next" aria-label="Next step" title="Next step (→)"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="chev" d="M6 3l5 5-5 5"/></svg></button>
+    <button type="button" class="bd-last" aria-label="Last step" title="Last step (End)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v10L10.5 8z"/><rect x="11.5" y="3" width="2" height="10"/></svg></button>
     <input type="range" class="bd-scrub" min="0" max="0" value="0" aria-label="Step">
     <span class="bd-pos"></span>
     <label>Speed <select class="bd-speed"><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
@@ -1821,7 +1826,7 @@ function bdPlay() {
     bdShow(bd.at + 1);
     bd.timer = setTimeout(tick, 1300 / bdSpeed());
   };
-  board.querySelector(".bd-play").textContent = "⏸";
+  board.querySelector(".bd-play").classList.add("playing");
   board.querySelector(".bd-play").setAttribute("aria-label", "Pause");
   bd.timer = setTimeout(tick, 400 / bdSpeed());
 }
@@ -1829,7 +1834,7 @@ function bdPause() {
   if (!bd) return;
   clearTimeout(bd.timer);
   bd.timer = null;
-  board.querySelector(".bd-play").textContent = "▶";
+  board.querySelector(".bd-play").classList.remove("playing");
   board.querySelector(".bd-play").setAttribute("aria-label", "Play");
 }
 const bdToggle = () => bd.timer ? bdPause() : bdPlay();
@@ -1875,6 +1880,7 @@ board.querySelector(".bd-close").addEventListener("click", closeReplay);
 board.querySelector(".bd-first").addEventListener("click", () => { bdPause(); bdShow(0); });
 board.querySelector(".bd-prev").addEventListener("click", () => { bdPause(); bdShow(bd.at - 1); });
 board.querySelector(".bd-next").addEventListener("click", () => { bdPause(); bdShow(bd.at + 1); });
+board.querySelector(".bd-last").addEventListener("click", () => { bdPause(); bdShow(bd.shown.length - 1); });
 board.querySelector(".bd-play").addEventListener("click", bdToggle);
 bdScrub.addEventListener("input", () => { bdPause(); bdShow(Number(bdScrub.value), false); });
 board.querySelector(".bd-passes").addEventListener("change", () => { pickFrames(bd.shown[bd.at]); bdShow(bd.at, false); });
