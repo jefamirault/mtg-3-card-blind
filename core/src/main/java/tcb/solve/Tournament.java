@@ -22,12 +22,11 @@ import tcb.solve.Solver.Options;
 
 /**
  * Round robin: every pair of entries plays two games, one with each deck on the play.
- * Scoring per game: win 3, draw 1, loss 0; games involving randomness score the expectation
- * (3 * P(win) + P(draw)). Highest total wins the tournament.
+ * Scoring per game is a {@link Scoring} (win 3, draw 1, loss 0 unless {@link Results#scoredBy}
+ * picks another); games involving randomness score the expectation (3 * P(win) + P(draw)).
+ * Highest total wins the tournament.
  */
 public final class Tournament {
-    public static final int WIN_POINTS = 3;
-    public static final int DRAW_POINTS = 1;
 
     /**
      * One solved game; {@code result.value()} is from deck {@code a}'s point of view.
@@ -38,8 +37,8 @@ public final class Tournament {
      */
     public record Game(int a, int b, int startingPlayer, GameResult result, boolean cached, byte[] tree) {
         /** Expected points for {@code entry} (which must be a or b). */
-        public double pointsFor(int entry) {
-            return WIN_POINTS * winChance(entry) + DRAW_POINTS * result.pDraw();
+        public double pointsFor(int entry, Scoring scoring) {
+            return scoring.points(winChance(entry), result.pDraw());
         }
 
         public double winChance(int entry) {
@@ -53,6 +52,9 @@ public final class Tournament {
 
     /** Wins/draws/losses are expected counts (fractional when games involve randomness). */
     public record Standing(DeckList deck, double points, double wins, double draws, double losses) {
+        public double games() {
+            return wins + draws + losses;
+        }
     }
 
     /** A game the tournament was stopped before it finished. */
@@ -62,8 +64,20 @@ public final class Tournament {
     /**
      * @param games     the games played; standings count only these
      * @param notPlayed games left unplayed because the tournament was stopped (empty otherwise)
+     * @param scoring   how {@code standings} and {@link #pointsAgainst} score each game
      */
-    public record Results(List<DeckList> entries, List<Game> games, List<Standing> standings, List<Unplayed> notPlayed) {
+    public record Results(List<DeckList> entries, List<Game> games, List<Standing> standings, List<Unplayed> notPlayed,
+                          Scoring scoring) {
+        /** The same games, scored with {@code scoring}. */
+        public Results scoredBy(Scoring scoring) {
+            return new Results(entries, games, Tournament.standings(entries, games, scoring), notPlayed, scoring);
+        }
+
+        /** Entry {@code standing}'s points as a percentage of the points available in its games. */
+        public double percent(Standing standing) {
+            return scoring.percentOf(standing.points(), standing.games());
+        }
+
         /** True if both games between {@code i} and {@code j} were played. */
         public boolean bothPlayed(int i, int j) {
             return notPlayed.stream().noneMatch(u -> (u.a() == i && u.b() == j) || (u.a() == j && u.b() == i));
@@ -74,7 +88,7 @@ public final class Tournament {
             double total = 0;
             for (Game g : games) {
                 if ((g.a() == i && g.b() == j) || (g.a() == j && g.b() == i)) {
-                    total += g.pointsFor(i);
+                    total += g.pointsFor(i, scoring);
                 }
             }
             return total;
@@ -234,7 +248,8 @@ public final class Tournament {
                     }
                 }
             }
-            return new Results(List.copyOf(entries), games, standings(entries, games), notPlayed);
+            return new Results(List.copyOf(entries), games, standings(entries, games, Scoring.THREE_ONE), notPlayed,
+                    Scoring.THREE_ONE);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
@@ -273,7 +288,7 @@ public final class Tournament {
         }
     }
 
-    static List<Standing> standings(List<DeckList> entries, List<Game> games) {
+    static List<Standing> standings(List<DeckList> entries, List<Game> games, Scoring scoring) {
         List<Standing> standings = new ArrayList<>();
         for (int i = 0; i < entries.size(); i++) {
             double points = 0, wins = 0, draws = 0, losses = 0;
@@ -281,7 +296,7 @@ public final class Tournament {
                 if (g.a() != i && g.b() != i) {
                     continue;
                 }
-                points += g.pointsFor(i);
+                points += g.pointsFor(i, scoring);
                 wins += g.winChance(i);
                 draws += g.result().pDraw();
                 losses += g.lossChance(i);

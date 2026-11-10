@@ -21,7 +21,12 @@ judged on is the deck you chose, not how well you play.
 - Turns are numbered from 1 and count turn cycles: turn 3 is each player's third turn, so a
   result like "wins on turn 3 (B's turn)" names whose half of the turn it was.
 - Scoring per game: **win 3, draw 1, loss 0**. For games involving randomness the score is the
-  expectation, 3·P(win) + P(draw). The deck with the most points wins.
+  expectation, 3·P(win) + P(draw). The deck with the most points wins (more wins breaks a tie).
+- Or **win 2, draw 1, loss 0**: [3cardblind.com's scoring](https://www.3cardblind.com/format-info/rules)
+  (a win 1, a draw 0.5) with whole numbers. Standings then show each deck's points as a
+  percentage of the points it could have scored. A draw is worth half a win here, not a third, so
+  the two can rank the same results differently. Scoring doesn't change any game: the web UI's
+  *Scoring* setting re-scores saved tournaments too, and the CLI takes `--scoring 2-1-0`.
 
 ## Usage
 
@@ -82,7 +87,8 @@ from the Scryfall API in the browser; click a double-faced card's scan to turn i
 
 `tournament` takes deck files or directories of `.txt` decks. It prints each result as it's
 found, then a matrix showing the points each deck scored against each other deck, then the
-standings. `--json` also writes the optimal line for every game.
+standings. `--json` also writes the optimal line for every game. `--scoring` picks `3-1-0`
+(default) or `2-1-0`.
 
 Solved games are saved in a cache folder (`--cache`, default `cache`), one JSON file per game,
 and later tournaments reuse them, so adding an entry only solves the new pairings. A game is

@@ -21,6 +21,9 @@ public final class ResultsJson {
             entries.add(Map.of("name", d.name(), "cards", d.cards()));
         }
         root.put("entries", entries);
+        // How standings and matrix score a game. The per-game probabilities below are the results
+        // themselves, so the web UI can re-score saved tournaments.
+        root.put("scoring", r.scoring().id());
         // matrix[i][j]: points entry i scored against entry j over both games (null on the diagonal,
         // and for pairs with a game left unplayed by a stopped tournament)
         List<List<Double>> matrix = new ArrayList<>();
@@ -38,6 +41,9 @@ public final class ResultsJson {
             m.put("name", s.deck().name());
             m.put("cards", s.deck().cards());
             m.put("points", s.points());
+            if (r.scoring().percent()) {
+                m.put("percent", r.percent(s));
+            }
             m.put("wins", s.wins());
             m.put("draws", s.draws());
             m.put("losses", s.losses());

@@ -29,6 +29,7 @@ import tcb.solve.Tournament;
 import tcb.solve.Turns;
 import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
+import tcb.solve.Scoring;
 import tcb.solve.Tournament.Results;
 import tcb.solve.Tournament.Standing;
 
@@ -169,11 +170,22 @@ public final class Main {
         @Option(names = "--no-cache", description = "Solve every game and don't save results to the cache.")
         boolean noCache;
 
+        @Option(names = "--scoring", defaultValue = "3-1-0", paramLabel = "W-D-L",
+                description = "Points for a win, draw and loss: 3-1-0, or 2-1-0 (3cardblind.com's win 1, draw 0.5) with standings as a percentage of the points available. Default: ${DEFAULT-VALUE}")
+        String scoring;
+
         @CommandLine.Mixin
         SearchOptions search;
 
         @Override
         public Integer call() throws IOException {
+            Scoring sc;
+            try {
+                sc = Scoring.parse(scoring);
+            } catch (IllegalArgumentException e) {
+                OUT.println(e.getMessage());
+                return 2;
+            }
             ForgeEnv.init();
             List<DeckList> entries = new ArrayList<>();
             for (Path file : deckFiles(paths)) {
@@ -192,7 +204,7 @@ public final class Main {
                 return 1;
             }
             Results results = Tournament.run(entries, search.toOptions(), threads, msg -> OUT.println("  " + msg),
-                    ConcurrentHashMap.newKeySet(), new Tournament.Stop(), noCache ? null : new ResultCache(cache));
+                    ConcurrentHashMap.newKeySet(), new Tournament.Stop(), noCache ? null : new ResultCache(cache)).scoredBy(sc);
             printMatrix(results);
             printStandings(results);
             if (json != null) {
@@ -206,7 +218,8 @@ public final class Main {
     static void printMatrix(Results r) {
         int n = r.entries().size();
         int w = Math.max(6, r.entries().stream().mapToInt(d -> d.name().length()).max().orElse(6));
-        OUT.println("\nPoints scored by row deck against column deck (2 games, 3 per win, 1 per draw):");
+        OUT.printf("%nPoints scored by row deck against column deck (2 games, %d per win, %d per draw):%n",
+                r.scoring().win(), r.scoring().draw());
         StringBuilder header = new StringBuilder(" ".repeat(w + 2));
         for (int j = 0; j < n; j++) {
             header.append(String.format("%6d", j + 1));
@@ -225,7 +238,10 @@ public final class Main {
         OUT.println("\nStandings:");
         int rank = 1;
         for (Standing s : r.standings()) {
-            OUT.printf("%2d. %-24s %6s pts  (W-D-L %s-%s-%s)  %s%n", rank++, s.deck().name(), fmt(s.points()),
+            String score = r.scoring().percent()
+                    ? String.format("%5.1f%%  %6s pts", r.percent(s), fmt(s.points()))
+                    : String.format("%6s pts", fmt(s.points()));
+            OUT.printf("%2d. %-24s %s  (W-D-L %s-%s-%s)  %s%n", rank++, s.deck().name(), score,
                     fmt(s.wins()), fmt(s.draws()), fmt(s.losses()), String.join(", ", s.deck().cards()));
         }
         if (!r.allComplete()) {

@@ -64,7 +64,7 @@
     box-shadow: 0 6px 18px rgba(23, 32, 43, .14);
   }
   .settings-grid label { color: var(--ink); font-size: .88rem; }
-  .settings-grid input[type=number] {
+  .settings-grid input[type=number], .settings-grid select {
     width: 100%; padding: .3rem .45rem; background: #fff; border: 1px solid var(--rule); border-radius: 3px;
   }
   .settings-grid input[type=checkbox] { justify-self: start; width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--action); }
@@ -466,8 +466,14 @@
         <input type="checkbox" id="opt-exact">
         <label for="opt-trees">Save search trees</label>
         <input type="checkbox" id="opt-trees">
+        <label for="opt-scoring" title="Points for a win, a draw and a loss">Scoring</label>
+        <select id="opt-scoring">
+          <option value="3-1-0">3 / 1 / 0</option>
+          <option value="2-1-0">2 / 1 / 0, %</option>
+        </select>
         <p class="hint">Games still going at the turn limit are draws. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
         <p class="hint">Save search trees keeps every game's searched tree to browse afterwards. It's for small tournaments (up to 8 entries): each game's tree can take a few MB, and cached games are solved again.</p>
+        <p class="hint">Scoring gives points for a win, a draw and a loss. It doesn't change any game, so it re-scores saved tournaments too. 2 / 1 / 0 is 3cardblind.com's scoring (a draw is half a win), and shows each deck's points as a percentage of the points it could have scored.</p>
         <button type="button" class="reset" id="opt-reset">Reset to defaults</button>
       </div>
     </details>
@@ -1408,10 +1414,35 @@ function saveSettings() {
 for (const sel of [...Object.values(optionInputs), "#opt-exact", "#opt-trees"]) $(sel).addEventListener("change", saveSettings);
 $("#opt-reset").addEventListener("click", () => {
   try { localStorage.removeItem("tcb.options"); } catch { /* nothing stored */ }
+  setScoring("3-1-0");
   const d = defaults;
   defaults = null;
   if (d) loadSettings(d);
 });
+// ---- scoring: points per game, remembered in this browser. It only ranks results, so saved
+// tournaments are re-scored here from each entry's won/drawn/lost record and each game's chances.
+const SCORINGS = { "3-1-0": { win: 3, draw: 1, percent: false }, "2-1-0": { win: 2, draw: 1, percent: true } };
+const scoring = () => SCORINGS[$("#opt-scoring").value] || SCORINGS["3-1-0"];
+function setScoring(id) {
+  $("#opt-scoring").value = SCORINGS[id] ? id : "3-1-0";
+  try { localStorage.setItem("tcb.scoring", $("#opt-scoring").value); } catch { /* not remembered */ }
+  renderHistory();
+  showSaved();
+}
+try {
+  const stored = localStorage.getItem("tcb.scoring");
+  if (SCORINGS[stored]) $("#opt-scoring").value = stored;
+} catch { /* 3 / 1 / 0 */ }
+$("#opt-scoring").addEventListener("change", () => setScoring($("#opt-scoring").value));
+// Records ({name, wins, draws, losses}) with points and percent added, best first (more wins breaks ties).
+function ranked(records, sc = scoring()) {
+  return records.map((s) => {
+    const points = sc.win * s.wins + sc.draw * s.draws, games = s.wins + s.draws + s.losses;
+    return { ...s, points, percent: games > 0 ? 100 * points / (sc.win * games) : 0 };
+  }).sort((x, y) => y.points - x.points || y.wins - x.wins);
+}
+const score = (s, sc = scoring()) => sc.percent ? `${fmt(s.percent)}%` : `${fmt(s.points)} pts`;
+
 const describeOptions = (o) => `${duration(o.timeSeconds)} and ${Number(o.nodes).toLocaleString()} nodes per game, `
   + `turn limit ${o.turns ?? Math.floor(o.maxTurns / 2)}${o.exactTurns ? ", exact turns" : ""}${o.saveTrees ? ", search trees saved" : ""}`;
 
@@ -1470,7 +1501,7 @@ function renderHistory() {
       el("span", { class: "summary" },
         `${h.entries.length} entries, ${h.games} games in ${duration(h.seconds)}`
         + (h.notPlayed ? ` (stopped, ${h.notPlayed} not played)` : "")
-        + ` · ${h.leader} first with ${fmt(h.leaderPoints)} pts`));
+        + (h.standings?.length ? ` · ${ranked(h.standings)[0].name} first with ${score(ranked(h.standings)[0])}` : "")));
     view.addEventListener("click", () => { viewing = h.id; renderHistory(); showSaved(); });
     const del = el("button", { class: "remove", type: "button", "aria-label": "Delete results from " + when(h.finished) }, "Delete");
     del.addEventListener("click", async () => {
@@ -1588,11 +1619,12 @@ function searchLine(g) {
   return details;
 }
 
-function cellColor(points) {
-  // 0 (lost both) -> red, 2 (two draws) -> grey, 6 (won both) -> green
+function cellColor(points, sc = scoring()) {
+  // 0 (lost both) -> red, two draws -> grey, won both -> green
   const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
   const red = [176, 59, 59], grey = [140, 146, 156], green = [46, 122, 85];
-  const rgb = points <= 2 ? mix(red, grey, points / 2) : mix(grey, green, (points - 2) / 4);
+  const draws = 2 * sc.draw, wins = 2 * sc.win;
+  const rgb = points <= draws ? mix(red, grey, points / draws) : mix(grey, green, (points - draws) / (wins - draws));
   return `rgb(${rgb.join(",")})`;
 }
 
@@ -1923,21 +1955,30 @@ function showTree(box, data, g) {
 // treesId: the saved tournament whose games have search trees to browse; null if none
 function renderResults(r, treesId = null, replayId = null) {
   const names = r.entries.map((e) => e.name);
-  const standings = el("ol", { class: "standings" }, ...r.standings.map((s, i) =>
+  const sc = scoring();
+  const standings = el("ol", { class: "standings" }, ...ranked(r.standings, sc).map((s, i) =>
     el("li", {},
       el("span", { class: "rank" }, String(i + 1)),
       el("span", {}, el("span", { class: "standing-name" }, s.name), el("span", { class: "standing-cards" }, ...cardLinks(s.cards))),
-      el("span", { class: "pts" }, fmt(s.points) + " pts",
-        el("span", { class: "record" }, `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)))));
+      el("span", { class: "pts" }, score(s, sc),
+        el("span", { class: "record" }, (sc.percent ? `${fmt(s.points)} of ${fmt(sc.win * (s.wins + s.draws + s.losses))} pts, ` : "")
+          + `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)))));
+
+  // Points row i scored against column j over their two games. The saved matrix is null where
+  // there's nothing to score: the diagonal, and pairs with a game left unplayed.
+  const against = (i, j) => r.games.reduce((t, g) =>
+    g.a === names[i] && g.b === names[j] ? t + sc.win * g.pWinA + sc.draw * g.pDraw
+    : g.a === names[j] && g.b === names[i] ? t + sc.win * g.pWinB + sc.draw * g.pDraw : t, 0);
 
   const head = el("tr", {}, el("th"), ...names.map((n, j) => el("th", { scope: "col", title: n }, String(j + 1))));
   const rows = names.map((n, i) => el("tr", {},
     el("th", { scope: "row" }, `${i + 1}. ${n}`),
-    ...r.matrix[i].map((p, j) => i === j
-      ? el("td", { class: "self" }, "–")
-      : p == null
-      ? el("td", { class: "unplayed", title: `${n} vs ${names[j]}: not all games played` }, "·")
-      : Object.assign(el("td", { title: `${n}: ${fmt(p)} of 6 points` }, fmt(p)), { style: `background:${cellColor(p)}` }))));
+    ...r.matrix[i].map((saved, j) => {
+      if (i === j) return el("td", { class: "self" }, "–");
+      if (saved == null) return el("td", { class: "unplayed", title: `${n} vs ${names[j]}: not all games played` }, "·");
+      const p = against(i, j);
+      return Object.assign(el("td", { title: `${n}: ${fmt(p)} of ${2 * sc.win} points` }, fmt(p)), { style: `background:${cellColor(p, sc)}` });
+    })));
   const matrix = el("div", { class: "matrix-wrap" }, el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, ...rows)));
 
   const games = r.games.map((g, k) => {
@@ -1972,7 +2013,7 @@ function renderResults(r, treesId = null, replayId = null) {
     standings,
     el("h3", {}, "Matchups"),
     matrix,
-    el("p", { class: "caption" }, "Points each row deck scored against each column deck over their two games: 6 means it won both, 2 means two draws."
+    el("p", { class: "caption" }, `Points each row deck scored against each column deck over their two games: ${2 * sc.win} means it won both, ${2 * sc.draw} means two draws.`
       + (notPlayed.length ? " A dot marks a pair with a game left unplayed." : "")),
     el("h3", {}, "Games"),
     el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found"

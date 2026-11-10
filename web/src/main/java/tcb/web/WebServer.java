@@ -678,7 +678,13 @@ public final class WebServer {
                 JsonObject results = saved.getAsJsonObject("results");
                 List<String> entries = new ArrayList<>();
                 results.getAsJsonArray("entries").forEach(e -> entries.add(e.getAsJsonObject().get("name").getAsString()));
-                JsonObject top = results.getAsJsonArray("standings").get(0).getAsJsonObject();
+                // Each entry's record, without points: the page ranks them by its own scoring.
+                List<Map<String, Object>> records = new ArrayList<>();
+                for (var s : results.getAsJsonArray("standings")) {
+                    JsonObject o = s.getAsJsonObject();
+                    records.add(Map.of("name", o.get("name").getAsString(), "wins", o.get("wins").getAsDouble(),
+                            "draws", o.get("draws").getAsDouble(), "losses", o.get("losses").getAsDouble()));
+                }
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("id", saved.get("id").getAsString());
                 m.put("finished", saved.get("finished").getAsString());
@@ -686,8 +692,7 @@ public final class WebServer {
                 m.put("entries", entries);
                 m.put("games", results.getAsJsonArray("games").size());
                 m.put("notPlayed", results.has("notPlayed") ? results.getAsJsonArray("notPlayed").size() : 0);
-                m.put("leader", top.get("name").getAsString());
-                m.put("leaderPoints", top.get("points").getAsDouble());
+                m.put("standings", records);
                 out.add(m);
             }
         }
