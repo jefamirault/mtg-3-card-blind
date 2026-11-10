@@ -133,6 +133,29 @@ class SolverTest {
     }
 
     @Test
+    void searchesPastTheTurnLimitForASlowWin() {
+        // One 1/1 needs 20 attacks: a win on turn 21, well past a limit of 6 turn cycles. A draw that
+        // only comes from the limit is searched further (12, then 24 cycles), which finds the win.
+        DeckList memnite = DeckList.of("memnite", "Memnite", "Island", "Island");
+        GameResult r = new Solver(memnite, ISLANDS, 0, new Options(12, 12, 200_000, Duration.ofMinutes(5), false)).solve();
+        assertEquals(1, r.value(), 1e-9);
+        assertTrue(r.complete());
+        assertEquals(48, r.provenTurnLimit());
+        assertEquals("=> A wins on turn 21 (A's turn)", r.principalVariation().get(r.principalVariation().size() - 1));
+    }
+
+    @Test
+    void aDrawPastTheExtendedLimitIsShownAtTheLimit() {
+        // The same win is out of reach of 4 times a limit of 2 turn cycles, so it stays the draw at 2.
+        DeckList memnite = DeckList.of("memnite", "Memnite", "Island", "Island");
+        GameResult r = new Solver(memnite, ISLANDS, 0, new Options(4, 4, 200_000, Duration.ofMinutes(5), false)).solve();
+        assertEquals(0, r.value(), 1e-9);
+        assertTrue(r.complete());
+        assertEquals(4, r.provenTurnLimit());
+        assertEquals("=> draw (turn limit 2)", r.principalVariation().get(r.principalVariation().size() - 1));
+    }
+
+    @Test
     void counterspellNeedsToBeOnThePlay() {
         DeckList tusker = DeckList.of("tusker", "Forest", "Forest", "Kalonian Tusker");
         DeckList counter = DeckList.of("counterspell", "Island", "Island", "Counterspell");

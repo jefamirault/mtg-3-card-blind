@@ -479,7 +479,7 @@
           <option value="3-1-0">3 / 1 / 0</option>
           <option value="2-1-0">2 / 1 / 0, %</option>
         </select>
-        <p class="hint">Games still going at the turn limit are draws. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
+        <p class="hint">Games still going at the turn limit are draws, but the search goes on past it, up to 4 times the limit, in case a player wins slowly. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
         <p class="hint">Save search trees keeps every game's searched tree to browse afterwards. It's for small tournaments (up to 8 entries): each game's tree can take a few MB, and cached games are solved again.</p>
         <p class="hint">Scoring gives points for a win, a draw and a loss. It doesn't change any game, so it re-scores saved tournaments too. 2 / 1 / 0 is 3cardblind.com's scoring (a draw is half a win), and shows each deck's points as a percentage of the points it could have scored.</p>
         <button type="button" class="reset" id="opt-reset">Reset to defaults</button>

@@ -778,6 +778,10 @@ public final class WebServer {
         JsonObject o = saved.has("options") ? saved.getAsJsonObject("options") : new JsonObject();
         int turnLimit = o.has("turns") ? Turns.forgeTurns(o.get("turns").getAsInt())
                 : o.has("maxTurns") ? o.get("maxTurns").getAsInt() : DEFAULTS.maxTurns();
+        // A slow win found past the limit was solved, and has to be replayed, with a higher one.
+        if (g.has("provenTurns")) {
+            turnLimit = Math.max(turnLimit, Turns.forgeTurns(g.get("provenTurns").getAsInt()));
+        }
         try {
             sendJson(ex, 200, GameReplay.replay(a, b, startingPlayer, line, turnLimit));
         } catch (RuntimeException e) {

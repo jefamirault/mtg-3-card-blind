@@ -30,8 +30,9 @@ import tcb.engine.Signals.Branch;
 public final class Solver {
 
     /**
-     * @param maxTurns       turn limit; games still going are draws. With repetition detection it
-     *                       is a safety net that should rarely bind.
+     * @param maxTurns       turn limit; games still going are draws. A draw that only comes from
+     *                       the limit is searched further, up to {@link #EXTEND_FACTOR} times
+     *                       maxTurns, and a win found there is the result.
      * @param firstTurnLimit start of iterative deepening (doubling up to maxTurns); equal to
      *                       maxTurns means a single search
      * @param exactTurns     key the transposition table on (position, turn) instead of position
@@ -62,7 +63,9 @@ public final class Solver {
      * @param pLoss             probability deck B wins
      * @param provenTurnLimit   largest turn limit fully searched, in Forge turns (0 if not even the
      *                          first finished); {@link #provenTurns()} in turn cycles
-     * @param complete          true if the result is final: decisive, or searched up to maxTurns
+     * @param complete          true if the result is final: decisive, independent of the turn limit
+     *                          (no game ran into it), or searched up to {@link #EXTEND_FACTOR}
+     *                          times maxTurns
      * @param principalVariation the optimal line found, as readable decisions
      */
     public record GameResult(double pWin, double pDraw, double pLoss, int provenTurnLimit, boolean complete,
@@ -144,6 +147,12 @@ public final class Solver {
     public record Decision(int player, String kind, int turn, String choice, int tried, int options) {
     }
 
+    /**
+     * How far past maxTurns the search goes for a game that is a draw only because it was still
+     * going at the limit: up to this many times maxTurns.
+     */
+    public static final int EXTEND_FACTOR = 4;
+
     /** Most decisions {@link #progress()} reports; the top of the tree changes slowly, the rest flickers. */
     public static final int MAX_LINE = 30;
 
@@ -159,6 +168,8 @@ public final class Solver {
     /** Positions on the current search path, for repetition detection. */
     private final Set<String> path = new HashSet<>();
     private boolean sawChance;
+    /** Whether the search for the current turn limit had a game end at that limit. */
+    private boolean limitHit;
     private long deadline;
 
     // Read by other threads through progress(); only the solving thread writes them.
@@ -267,20 +278,29 @@ public final class Solver {
         Line best = null;
         int bestLimit = 0;
         boolean complete = false;
-        for (int limit = Math.min(options.firstTurnLimit(), options.maxTurns()); ; limit = Math.min(limit * 2, options.maxTurns())) {
+        int cap = options.maxTurns() * EXTEND_FACTOR;
+        for (int limit = Math.min(options.firstTurnLimit(), options.maxTurns()); ; limit = nextLimit(limit, cap)) {
             Line line;
             try {
                 line = rootSearch(limit);
             } catch (BudgetExceeded e) {
                 break;
             }
-            best = line;
-            bestLimit = limit;
-            if (tree != null) {
-                tree.keep(limit);
+            boolean decisive = Math.abs(line.value()) > 1 - 1e-9;
+            // Past maxTurns the search is only looking for a slow win: a result that still isn't
+            // one stays as it was at maxTurns, so a draw is shown at the limit that was asked for.
+            if (limit <= options.maxTurns() || decisive) {
+                best = line;
+                bestLimit = limit;
+                if (tree != null) {
+                    tree.keep(limit);
+                }
             }
-            // A forced win/loss within a limit stays forced with more turns; otherwise go deeper.
-            complete = Math.abs(line.value()) > 1 - 1e-9 || limit >= options.maxTurns();
+            // A forced win/loss within a limit stays forced with more turns, and so does any result
+            // of a search that never ran into the limit. Otherwise go deeper: up to maxTurns to have
+            // a result at all, and beyond it, up to the cap, in case a player wins slowly. If the
+            // budget runs out on the way there, the draw at maxTurns is the result, but unproven.
+            complete = decisive || !limitHit || limit >= cap;
             if (complete) {
                 break;
             }
@@ -306,6 +326,7 @@ public final class Solver {
         table.clear();
         path.clear();
         sawChance = false;
+        limitHit = false;
         turnLimit = limit;
         Line aWins = rootPass("can A force a win?", limit, 0, 1, true);
         if (!sawChance) {
@@ -353,6 +374,9 @@ public final class Solver {
             }
             lastNode = null;
             if (outcome.isTerminal()) {
+                if (atTurnLimit(outcome, limit)) {
+                    limitHit = true;
+                }
                 if (tree != null) {
                     lastNode = tree.end(ending(outcome, limit));
                 }
@@ -558,8 +582,18 @@ public final class Solver {
         return switch (outcome.result()) {
             case A_WINS -> "A wins" + when;
             case B_WINS -> "B wins" + when;
-            case DRAW -> outcome.turn() > limit ? "draw (turn limit " + limit / 2 + ")" : "draw (position repeats)";
+            case DRAW -> atTurnLimit(outcome, limit) ? "draw (turn limit " + limit / 2 + ")" : "draw (position repeats)";
         };
+    }
+
+    /** Whether a finished game is a draw only because it was still going at the turn limit. */
+    private static boolean atTurnLimit(Outcome outcome, int limit) {
+        return outcome.result() == GameRunner.Result.DRAW && outcome.turn() > limit;
+    }
+
+    /** The turn limit to search after {@code limit}: doubling, stopping at maxTurns and at the cap on the way. */
+    private int nextLimit(int limit, int cap) {
+        return Math.min(limit * 2, limit < options.maxTurns() ? options.maxTurns() : cap);
     }
 
     private String key(Branch branch) {

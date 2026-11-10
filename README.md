@@ -17,7 +17,10 @@ judged on is the deck you chose, not how well you play.
   - Players maximise P(win) − P(loss).
   - Random events (coin flips, dice, random discard, shuffles) are averaged over every outcome.
   - A game that can loop forever is a **draw**, and so is a game still going at the turn limit
-    (25 turns by default).
+    (25 turns by default). A deck that wins slowly isn't cut off by the limit, though: a draw that
+    only comes from the limit is searched further, doubling the limit up to 4 times its value
+    (100 turns by default), and a win found there counts. If the time or node budget runs out
+    first, the draw is marked unproven.
 - Turns are numbered from 1 and count turn cycles: turn 3 is each player's third turn, so a
   result like "wins on turn 3 (B's turn)" names whose half of the turn it was.
 - Scoring per game: **win 3, draw 1, loss 0**. For games involving randomness the score is the
@@ -103,7 +106,7 @@ Search options shared by `solve` and `tournament`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--max-turns` | 25 | Turn limit, in turns of each player; a game still going counts as a draw |
+| `--max-turns` | 25 | Turn limit, in turns of each player; a game still going counts as a draw, unless searching up to 4 times the limit finds a win |
 | `--nodes` | 2,000,000 | Search nodes per game before giving up |
 | `--time` | 10m | Time per game before giving up |
 | `--first-turns` | off | Iteratively deepen the turn limit from here (doubling), so a game that runs out of budget still has a result proven to a shorter limit |

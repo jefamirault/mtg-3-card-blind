@@ -48,7 +48,7 @@ public final class Main {
 
     /** Search limits shared by solve and tournament (a picocli mixin, so public with a no-arg constructor). */
     public static class SearchOptions {
-        @Option(names = "--max-turns", defaultValue = "25", description = "Turn limit, in turns of each player (turn 3 is each player's third turn); unfinished games are draws. Default: ${DEFAULT-VALUE}")
+        @Option(names = "--max-turns", defaultValue = "25", description = "Turn limit, in turns of each player (turn 3 is each player's third turn); unfinished games are draws, unless searching up to 4 times the limit finds a win. Default: ${DEFAULT-VALUE}")
         int maxTurns;
 
         @Option(names = "--first-turns", description = "Iteratively deepen the turn limit from this value (doubling), so a budget overrun still leaves a result proven to a shorter limit. Default: off")
