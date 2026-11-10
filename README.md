@@ -46,14 +46,14 @@ Hypnotic Specter
 ### Web UI
 
 ```sh
-./local_server.sh          # builds if the code changed, then serves http://localhost:8080
+./local_server.sh          # builds if the code changed, then serves http://localhost:8642
 ./local_server.sh -p 3000  # another port; also: status, stop, restart
 ```
 
 It runs in the foreground (Ctrl-C stops it) and passes `--entries`, `--history`, `--cache`,
 `--no-cache` and `--threads` on to the server. `./tcb-web` starts the server without the checks.
 
-Open http://localhost:8080 to add entries (with card-name suggestions and legality checks),
+Open http://localhost:8642 to add entries (with card-name suggestions and legality checks),
 run the tournament, and browse the standings, the matchup matrix and the optimal line of every
 game. Entries are saved as deck files in the `--entries` folder, so the CLI can run the same
 field: `./tcb tournament entries`. The first time it runs (no `--entries` folder yet), it starts

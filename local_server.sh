@@ -2,7 +2,7 @@
 # Runs the 3 Card Blind web UI in the foreground, so start it in its own terminal tab and the log
 # stays visible. Builds first if the code changed since the last build.
 #
-#   ./local_server.sh              # http://localhost:8080
+#   ./local_server.sh              # http://localhost:8642
 #   ./local_server.sh -p 3000      # another port
 #   ./local_server.sh status       # report any server already running from this checkout
 #   ./local_server.sh stop         # stop it
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${PORT:-8080}"
+PORT="${PORT:-8642}"
 PORT_SET=""
 ACTION="serve"
 EXTRA=()
@@ -22,7 +22,7 @@ EXTRA=()
 usage() {
   cat <<'EOF'
 Usage: ./local_server.sh [-p PORT] [status|stop|restart] [server options]
-  (no args)      run the web UI at http://localhost:8080 in the foreground
+  (no args)      run the web UI at http://localhost:8642 in the foreground
   -p, --port N   use port N (bare "./local_server.sh N" also works)
   status         report any server already running from this checkout
   stop           stop it
