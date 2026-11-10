@@ -283,6 +283,10 @@
   }
   .bc-inner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .bcard.tapped { margin: 0 calc(var(--bw) * .2); }
+  /* when the battlefield row has room (bdSlots), every card gets a slot as wide as a tapped one,
+     so tapping or untapping only turns the card and nothing beside it moves */
+  .bd-row.slots .bcard { margin: 0 calc(var(--bw) * .2); }
+  .bd-row.slots .land.first { margin-left: auto; }
   .bcard.attacking .bc-inner { box-shadow: 0 0 0 3px #FF6B5E, 0 4px 14px rgba(0, 0, 0, .6); }
   .bcard.blocking .bc-inner { box-shadow: 0 0 0 3px #7DB8FF, 0 4px 14px rgba(0, 0, 0, .6); }
   .bc-badges { position: absolute; right: -.3rem; bottom: -.3rem; display: flex; flex-direction: column; align-items: flex-end; gap: .15rem; z-index: 1; }
@@ -1763,6 +1767,7 @@ function bdShow(at, animate = true) {
     el("div", {}, ...bdSide(b, false, f.active === "B", prev && prev.players[1].life)),
     el("div", { class: "bd-mid" }, f.stack.length ? el("span", { class: "bd-label" }, "Stack") : null, stack),
     el("div", {}, ...bdSide(a, true, f.active === "A", prev && prev.players[0].life)));
+  bdSlots();
   bd.prev = f;
 
   if (duration) {
@@ -1793,6 +1798,20 @@ function bdShow(at, animate = true) {
   board.querySelector(".bd-pos").textContent = `${bd.at + 1} / ${bd.shown.length}`;
   if (last) bdPause();
 }
+
+// Gives each battlefield row fixed, tapped-card-wide slots when they fit on one line (see the
+// .slots CSS); otherwise the row stays packed. Depends only on the card count and the row and card
+// widths, never on which cards are tapped, so tapping can't flip it.
+function bdSlots() {
+  for (const row of bdTable.querySelectorAll(".bd-row.field")) {
+    const cards = row.querySelectorAll(":scope > .bcard");
+    if (!cards.length) { row.classList.remove("slots"); continue; }
+    const bw = cards[0].offsetWidth, gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+    const need = cards.length * bw * 1.4 + (cards.length - 1) * gap;
+    row.classList.toggle("slots", need <= row.clientWidth + 0.5);
+  }
+}
+addEventListener("resize", () => { if (bd) bdSlots(); });
 
 const bdSpeed = () => Number(board.querySelector(".bd-speed").value);
 function bdPlay() {
@@ -1830,6 +1849,7 @@ try { bdZoom.value = localStorage.getItem("tcb.boardZoom") || "1"; } catch { /* 
 board.style.setProperty("--zoom", bdZoom.value);
 bdZoom.addEventListener("input", () => {
   board.style.setProperty("--zoom", bdZoom.value);
+  if (bd) bdSlots();
   try { localStorage.setItem("tcb.boardZoom", bdZoom.value); } catch { /* not remembered */ }
 });
 // Hovering (or focusing) a card shows it big beside it, on whichever side has room.
