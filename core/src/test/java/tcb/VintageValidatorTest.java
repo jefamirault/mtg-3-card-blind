@@ -49,12 +49,34 @@ class VintageValidatorTest {
     @Test
     void rejectsUnCards() {
         // Blacker Lotus has a (acorn) Secret Lair printing, which Forge's format file would accept.
-        assertFalse(VintageValidator.problems(DeckList.of("silver", "Blacker Lotus", "Swamp", "Swamp")).isEmpty());
+        assertEquals(List.of("not Vintage-legal: Blacker Lotus is only printed as an Un-/acorn card"),
+                VintageValidator.problems(DeckList.of("silver", "Blacker Lotus", "Swamp", "Swamp")));
     }
 
     @Test
     void acceptsNonAcornUnfinityCard() {
         assertTrue(VintageValidator.problems(DeckList.of("unf", "Saw in Half", "Swamp", "Swamp")).isEmpty());
+    }
+
+    @Test
+    void rejectsArenaRebalancedCard() {
+        // Forge has scripts for Arena's rebalanced cards ("A-" names); no paper set prints them.
+        assertEquals(List.of("unknown card: A-Alrund's Epiphany"),
+                VintageValidator.problems(DeckList.of("alchemy", "A-Alrund's Epiphany", "Island", "Island")));
+        // one that a set does list
+        assertEquals(List.of("not Vintage-legal: A-Lier, Disciple of the Drowned is an Arena rebalanced card"),
+                VintageValidator.problems(DeckList.of("alchemy", "A-Lier, Disciple of the Drowned", "Island", "Island")));
+        // the paper card is fine
+        assertTrue(VintageValidator.problems(DeckList.of("paper", "Alrund's Epiphany", "Island", "Island")).isEmpty());
+    }
+
+    @Test
+    void rejectsArenaOnlyCard() {
+        assertEquals(List.of("unknown card: Treetop Recluse"),
+                VintageValidator.problems(DeckList.of("arena", "Treetop Recluse", "Forest", "Forest")));
+        // printed only in a digital set (Alchemy: Innistrad)
+        assertEquals(List.of("not Vintage-legal: Key to the Archive isn't printed in a Vintage-legal set (digital-only cards aren't legal)"),
+                VintageValidator.problems(DeckList.of("arena", "Key to the Archive", "Forest", "Forest")));
     }
 
     @Test

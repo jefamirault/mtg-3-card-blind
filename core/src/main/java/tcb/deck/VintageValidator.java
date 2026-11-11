@@ -15,7 +15,8 @@ import tcb.engine.ForgeEnv;
 
 /**
  * Checks that an entry is exactly 3 cards, each Vintage-legal (Forge's Vintage sets and banned
- * list). Any number of copies of a card is allowed, restricted cards included: 3CB ignores the
+ * list). The sets are the paper ones, so cards that exist only on Arena or Magic Online aren't
+ * legal. Any number of copies of a card is allowed, restricted cards included: 3CB ignores the
  * restricted list.
  */
 public final class VintageValidator {
@@ -42,7 +43,9 @@ public final class VintageValidator {
         GameFormat vintage = FModel.getFormats().getVintage();
         for (String name : new LinkedHashSet<>(deckList.cards())) {
             if (!hasTournamentLegalPrinting(vintage, name)) {
-                problems.add("not Vintage-legal: " + name + " is only printed as an Un-/acorn card");
+                problems.add("not Vintage-legal: " + name + (hasPrintingIn(vintage, name, true)
+                        ? " is only printed as an Un-/acorn card"
+                        : " isn't printed in a Vintage-legal set (digital-only cards aren't legal)"));
             }
         }
         if (!problems.isEmpty()) {
@@ -51,9 +54,11 @@ public final class VintageValidator {
         // Card by card rather than Forge's getDeckConformanceProblem, which also enforces the
         // restricted list.
         for (String name : new LinkedHashSet<>(deckList.cards())) {
-            if (!vintage.getFilterRules().test(lookup(name))) {
+            PaperCard card = lookup(name);
+            if (!vintage.getFilterRules().test(card)) {
                 problems.add("not Vintage-legal: " + name
-                        + (vintage.getBannedCardNames().contains(name) ? " is banned" : ""));
+                        + (vintage.getBannedCardNames().contains(name) ? " is banned"
+                                : card.isRebalanced() ? " is an Arena rebalanced card" : ""));
             }
         }
         return problems;
@@ -75,11 +80,15 @@ public final class VintageValidator {
      * allowed set that isn't an acorn printing.
      */
     public static boolean hasTournamentLegalPrinting(GameFormat format, String name) {
+        return hasPrintingIn(format, name, false);
+    }
+
+    private static boolean hasPrintingIn(GameFormat format, String name, boolean acornToo) {
         List<String> sets = format.getAllowedSetCodes();
         for (PaperCard printing : FModel.getMagicDb().getCommonCards().getAllCards(name)) {
             String number = printing.getCollectorNumber();
             boolean acorn = number != null && FUNNY_NUMBER.matcher(number).matches();
-            if (!acorn && (sets.isEmpty() || sets.contains(printing.getEdition()))) {
+            if ((acornToo || !acorn) && (sets.isEmpty() || sets.contains(printing.getEdition()))) {
                 return true;
             }
         }

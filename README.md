@@ -249,7 +249,9 @@ nodes per game).
     abilities, use a fixed seed instead of branching.
   - Calling heads or tails is fixed, which can't change a fair flip.
 - **Legality.** Forge's Vintage list is used, plus a check that rejects cards whose only legal-set
-  printings are acorn/Un-cards (for example Blacker Lotus's Secret Lair printing).
+  printings are acorn/Un-cards (for example Blacker Lotus's Secret Lair printing). Digital-only
+  cards aren't legal: Forge's Vintage sets are the paper ones, Arena's rebalanced cards ("A-"
+  names) are excluded, and cards Forge has a script for but lists in no set aren't loaded.
 - **Rules accuracy is Forge's.** A card that is scripted wrong in Forge is played wrong here.
 - **Speed.** Replaying a node costs a few milliseconds plus about 1 ms per turn played, so decks
   with many options at instant speed take longest. Most matchups finish in seconds to a minute

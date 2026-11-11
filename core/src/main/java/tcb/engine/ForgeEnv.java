@@ -16,6 +16,7 @@ import forge.gui.download.GuiDownloadService;
 import forge.gui.interfaces.IGuiBase;
 import forge.gui.interfaces.IGuiGame;
 import forge.item.PaperCard;
+import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.localinstance.skin.FSkinProp;
 import forge.localinstance.skin.ISkinImage;
 import forge.model.FModel;
@@ -52,7 +53,12 @@ public final class ForgeEnv {
         // Forge relies on this to avoid "Comparison method violates its general contract!" crashes
         System.setProperty("java.util.Arrays.useLegacyMergeSort", "true");
         GuiBase.setInterface(new HeadlessGui(forgeGuiDir.toAbsolutePath().normalize()));
-        FModel.initialize(null, null);
+        // Cards with a script but no set (Arena's rebalanced "A-" cards and a few Arena-only ones)
+        // would otherwise be loaded into Forge's UNKNOWN set, with a warning for each. Not saved.
+        FModel.initialize(null, prefs -> {
+            prefs.setPref(FPref.UI_LOAD_UNKNOWN_CARDS, false);
+            return null;
+        });
         initialized = true;
     }
 
