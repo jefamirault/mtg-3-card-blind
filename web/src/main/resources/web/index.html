@@ -267,7 +267,8 @@
   .bd-mid { display: flex; align-items: center; justify-content: center; gap: 1rem; min-height: 2rem; border-top: 1px dashed rgba(255, 255, 255, .1); border-bottom: 1px dashed rgba(255, 255, 255, .1); }
   .bd-stack { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
   .bd-stack-item { display: flex; align-items: center; gap: .5rem; background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 210, 120, .5); border-radius: 4px; padding: .3rem .5rem .3rem .3rem; font-size: .8rem; max-width: 22rem; }
-  .bd-caption { margin: 0; padding: .45rem 1rem; min-height: 1.4em; font-size: 1.02rem; text-align: center; border-top: 1px solid rgba(255, 255, 255, .12); }
+  /* room for two lines, so the board doesn't move between steps with and without actions */
+  .bd-caption { margin: 0; padding: .45rem 1rem; box-sizing: content-box; line-height: 1.5; min-height: 3em; font-size: 1.02rem; text-align: center; border-top: 1px solid rgba(255, 255, 255, .12); }
   .bd-caption .bd-end { color: #FFD37A; font-weight: 700; }
   .bd-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; padding: .4rem 1rem .8rem; }
   .bd-controls button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); color: #E9EDF3; border-radius: 3px; min-width: 2.4rem; padding: .25rem .5rem; cursor: pointer; }
@@ -1637,13 +1638,13 @@ function cellColor(points, sc = scoring()) {
   return `rgb(${rgb.join(",")})`;
 }
 
-// ---- animated replay: the server replays a saved game in Forge and sends the board at each
-// decision; cards keep their ids, so each one glides from where it was to where it is now.
+// ---- animated replay: the server replays a saved game in Forge and sends the board at the end
+// of each step of each turn, with the actions taken during it; cards keep their ids, so each one glides from where it was to where it is now.
 const board = $("#board");
 const bdTable = board.querySelector(".bd-table");
 const bdScrub = board.querySelector(".bd-scrub");
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-let bd = null; // { g, frames, end, shown: [frame indexes], at: index into shown, timer, art: Map name -> url }
+let bd = null; // { g, frames, end, at: index into frames, timer, art: Map name -> url }
 let bdReturn = null;
 
 function watchButton(id, k, g) {
@@ -1672,26 +1673,22 @@ async function openReplay(id, k, g, button) {
     const uris = c.image_uris || c.card_faces?.[0]?.image_uris;
     if (uris) art.set(n, uris.normal || uris.small);
   }).catch(() => {})));
-  bd = { g, frames: data.frames, end: data.end, art, timer: null, at: 0, shown: [], prev: null };
+  bd = { g, frames: data.frames, end: data.end, art, timer: null, at: 0, prev: null };
   bdReturn = button;
   board.querySelector("#board-title").textContent = `${g.a} vs ${g.b}, ${g.onThePlay} on the play`;
   board.hidden = false;
   document.body.style.overflow = "hidden";
   board.focus();
-  pickFrames(0);
+  bdScrub.max = String(bd.frames.length - 1);
   bdShow(0, false);
 }
 
-// Steps to show: every frame, or without the ones that only follow a pass (their changes show
-// up in the next step anyway). The first and last are always shown.
-function pickFrames(keepFrame) {
-  const all = board.querySelector(".bd-passes").checked;
-  bd.shown = bd.frames.map((f, i) => i).filter((i) => all || i === 0 || i === bd.frames.length - 1
-    || !/ priority: Pass$/.test(bd.frames[i].did || ""));
-  bdScrub.max = String(bd.shown.length - 1);
-  const at = bd.shown.findIndex((i) => i >= keepFrame);
-  bd.at = at < 0 ? bd.shown.length - 1 : at;
-}
+// The actions of a step to list: all of them, or without the passes.
+const bdActions = (f) => (f.did || []).filter((a) => board.querySelector(".bd-passes").checked || !/ priority: Pass$/.test(a));
+// A step where nothing happens: no action to list, and the board stays as the step before left
+// it. Playing the game shows these only briefly.
+const bdBoardKey = (f) => JSON.stringify([f.players, f.stack]);
+const bdQuiet = (i) => i > 0 && !bdActions(bd.frames[i]).length && bdBoardKey(bd.frames[i]) === bdBoardKey(bd.frames[i - 1]);
 
 const sideName = (who) => who === "A" ? bd.g.a : who === "B" ? bd.g.b : "Chance";
 const bdNamed = (text) => text.replace(/-> ([AB])\b/g, (_, p) => "→ " + sideName(p)).replace(/\b([AB])'s turn\b/g, (_, p) => sideName(p) + "'s turn");
@@ -1754,9 +1751,8 @@ function bdSide(p, me, active, lifeBefore) {
 
 function bdShow(at, animate = true) {
   peek.hidden = true; // its card is about to be replaced
-  bd.at = Math.max(0, Math.min(at, bd.shown.length - 1));
-  const i = bd.shown[bd.at];
-  const f = bd.frames[i];
+  bd.at = Math.max(0, Math.min(at, bd.frames.length - 1));
+  const f = bd.frames[bd.at];
   const prev = bd.prev;
   const duration = animate && !reducedMotion.matches ? 520 / bdSpeed() : 0;
   // where each card was, to glide it to its new place (FLIP)
@@ -1794,13 +1790,14 @@ function bdShow(at, animate = true) {
 
   const player = f.active ? sideName(f.active) : "";
   board.querySelector(".bd-status").textContent = `Turn ${f.turn}${player ? ` · ${player}'s turn` : ""}${f.phase ? ` · ${f.phase}` : ""}`;
-  const last = bd.at === bd.shown.length - 1;
+  const last = bd.at === bd.frames.length - 1;
+  const did = bdActions(f).map(describeAction);
   board.querySelector(".bd-caption").replaceChildren(...[
-    i === 0 ? "Start of the game" + (f.next ? `. Next: ${describeAction(f.next)}` : "") : describeAction(f.did),
-    last && bd.end ? el("span", {}, " · ", el("span", { class: "bd-end" }, bdNamed(bd.end).replace(/^([AB]) /, (_, p) => sideName(p) + " "))) : null,
+    did.length ? did.join(", then ") : bd.at === 0 ? "Start of the game" : null,
+    last && bd.end ? el("span", {}, did.length || bd.at === 0 ? " · " : "", el("span", { class: "bd-end" }, bdNamed(bd.end).replace(/^([AB]) /, (_, p) => sideName(p) + " "))) : null,
   ].filter(Boolean));
   bdScrub.value = String(bd.at);
-  board.querySelector(".bd-pos").textContent = `${bd.at + 1} / ${bd.shown.length}`;
+  board.querySelector(".bd-pos").textContent = `${bd.at + 1} / ${bd.frames.length}`;
   if (last) bdPause();
 }
 
@@ -1820,11 +1817,11 @@ addEventListener("resize", () => { if (bd) bdSlots(); });
 
 const bdSpeed = () => Number(board.querySelector(".bd-speed").value);
 function bdPlay() {
-  if (bd.at >= bd.shown.length - 1) bdShow(0, false);
+  if (bd.at >= bd.frames.length - 1) bdShow(0, false);
   const tick = () => {
-    if (bd.at >= bd.shown.length - 1) { bdPause(); return; }
+    if (bd.at >= bd.frames.length - 1) { bdPause(); return; }
     bdShow(bd.at + 1);
-    bd.timer = setTimeout(tick, 1300 / bdSpeed());
+    bd.timer = setTimeout(tick, (bdQuiet(bd.at) ? 350 : 1300) / bdSpeed());
   };
   board.querySelector(".bd-play").classList.add("playing");
   board.querySelector(".bd-play").setAttribute("aria-label", "Pause");
@@ -1880,15 +1877,15 @@ board.querySelector(".bd-close").addEventListener("click", closeReplay);
 board.querySelector(".bd-first").addEventListener("click", () => { bdPause(); bdShow(0); });
 board.querySelector(".bd-prev").addEventListener("click", () => { bdPause(); bdShow(bd.at - 1); });
 board.querySelector(".bd-next").addEventListener("click", () => { bdPause(); bdShow(bd.at + 1); });
-board.querySelector(".bd-last").addEventListener("click", () => { bdPause(); bdShow(bd.shown.length - 1); });
+board.querySelector(".bd-last").addEventListener("click", () => { bdPause(); bdShow(bd.frames.length - 1); });
 board.querySelector(".bd-play").addEventListener("click", bdToggle);
 bdScrub.addEventListener("input", () => { bdPause(); bdShow(Number(bdScrub.value), false); });
-board.querySelector(".bd-passes").addEventListener("change", () => { pickFrames(bd.shown[bd.at]); bdShow(bd.at, false); });
+board.querySelector(".bd-passes").addEventListener("change", () => bdShow(bd.at, false));
 // Captured first, so the card view (opened from the board) gets Escape and the arrows while it's up.
 document.addEventListener("keydown", (e) => {
   if (board.hidden || !lightbox.hidden || e.target.closest?.("select, input[type=range]")) return;
   const keys = { Escape: closeReplay, ArrowLeft: () => { bdPause(); bdShow(bd.at - 1); }, ArrowRight: () => { bdPause(); bdShow(bd.at + 1); },
-    " ": bdToggle, Home: () => { bdPause(); bdShow(0); }, End: () => { bdPause(); bdShow(bd.shown.length - 1); } };
+    " ": bdToggle, Home: () => { bdPause(); bdShow(0); }, End: () => { bdPause(); bdShow(bd.frames.length - 1); } };
   if (keys[e.key]) { e.preventDefault(); e.stopPropagation(); keys[e.key](); }
 }, true);
 

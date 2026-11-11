@@ -125,8 +125,11 @@ of the game, the option being tried there and how many of its options have been 
 *Watch the game* (in each finished game) replays its optimal line on an animated board: both
 players' hands, battlefields, graveyards and exile, the stack, life totals, and the turn and phase,
 with play/pause, stepping (arrow keys) and a scrubber. The server replays the saved line in Forge
-and snapshots the board at each decision (`GameReplay`), so tournaments saved earlier can be watched
-too. Steps that are only a pass are skipped unless *Show passes* is ticked. Hovering a card shows
+and snapshots the board at the end of each step of each turn (`GameReplay`), so tournaments saved
+earlier can be watched too. It advances one step of the turn at a time (untap, upkeep, draw, main
+phase, the combat steps, and so on), listing the actions taken in that step; steps the rules skip
+(the blockers and damage steps when nothing attacks) aren't shown, and when playing, a step where
+nothing happens is shown only briefly. Passes are listed only if *Show passes* is ticked. Hovering a card shows
 it full size, and *Card size* scales the board (remembered per browser).
 
 *Save search trees* (in *Search settings*, off by default, up to 8 entries) keeps each game's

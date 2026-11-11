@@ -121,7 +121,8 @@ public final class BoardSnapshot {
         return m;
     }
 
-    private static String phaseName(PhaseType phase) {
+    /** A step's name as shown, such as "Main phase 1". */
+    public static String phaseName(PhaseType phase) {
         return switch (phase) {
             case UNTAP -> "Untap";
             case UPKEEP -> "Upkeep";

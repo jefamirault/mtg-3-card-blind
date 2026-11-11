@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import com.google.common.eventbus.Subscribe;
+
 import forge.LobbyPlayer;
 import forge.ai.AiCache;
 import forge.ai.LobbyPlayerAi;
@@ -14,6 +16,11 @@ import forge.game.GameOutcome;
 import forge.game.GameRules;
 import forge.game.GameType;
 import forge.game.Match;
+import forge.game.card.Card;
+import forge.game.combat.Combat;
+import forge.game.event.GameEventTurnPhase;
+import forge.game.phase.PhaseHandler;
+import forge.game.phase.PhaseType;
 import forge.game.player.Player;
 import forge.game.player.RegisteredPlayer;
 import forge.util.MyRandom;
@@ -110,25 +117,79 @@ public final class GameRunner {
     }
 
     /**
-     * A replayed game with the board along the way: {@code boards.get(i)} is the board when
-     * {@code actions.get(i)} was decided (before it took effect), and the last board is where
-     * the game stopped, so there is one more board than actions.
+     * One step of a turn in a replayed game: the decisions taken during it, and the board when it
+     * ended (or where the game stopped, for the last one). {@code phase} is null for decisions
+     * taken before the first turn began.
      */
-    public record Watched(List<String> actions, List<Map<String, Object>> boards, Outcome outcome) {
+    public record Stop(int forgeTurn, String active, PhaseType phase, List<String> actions, Map<String, Object> board) {
+    }
+
+    /** A replayed game as the steps of its turns, in order. Steps the rules skip aren't listed. */
+    public record Watched(List<Stop> stops, Outcome outcome) {
     }
 
     /** Replays {@code tape} (usually {@link DecisionTape#following}) on the calling thread, recording the board. */
     public Watched watch(DecisionTape tape) {
-        List<String> actions = new ArrayList<>();
-        List<Map<String, Object>> boards = new ArrayList<>();
-        Game[] game = new Game[1];
-        tape.observe(action -> {
-            actions.add(action);
-            boards.add(BoardSnapshot.of(game[0]));
+        StepRecorder recorder = new StepRecorder();
+        tape.observe(action -> recorder.actions.add(action));
+        Outcome outcome = run(tape, g -> {
+            recorder.game = g;
+            g.subscribeToEvents(recorder);
         });
-        Outcome outcome = run(tape, g -> game[0] = g);
-        boards.add(BoardSnapshot.of(game[0]));
-        return new Watched(actions, boards, outcome);
+        recorder.close();
+        return new Watched(recorder.stops, outcome);
+    }
+
+    /** Listens to a game's steps beginning. It only reads the game, so watching doesn't change it. */
+    private static final class StepRecorder {
+        final List<Stop> stops = new ArrayList<>();
+        List<String> actions = new ArrayList<>();
+        Game game;
+        private int forgeTurn = 1;
+        private String active;
+        private PhaseType phase;
+        private boolean skipped;
+
+        /** Forge posts this between one step's end and the next one's turn-based actions. */
+        @Subscribe
+        public void stepBegins(GameEventTurnPhase e) {
+            close();
+            PhaseHandler ph = game.getPhaseHandler();
+            forgeTurn = ph.getTurn();
+            active = ph.getPlayerTurn() == null ? null : ph.getPlayerTurn().getName();
+            phase = e.phase();
+            skipped = isSkipped(ph, e.phase());
+        }
+
+        /** Ends the current step with the board as it is now. */
+        void close() {
+            boolean first = phase == null && stops.isEmpty();
+            if ((first || skipped) && actions.isEmpty()) {
+                return;
+            }
+            stops.add(new Stop(forgeTurn, active, phase, actions, BoardSnapshot.of(game)));
+            actions = new ArrayList<>();
+        }
+
+        /** Whether the turn has no such step this time (as {@code PhaseHandler.isSkippingPhase} decides, which runs later). */
+        private boolean isSkipped(PhaseHandler ph, PhaseType step) {
+            Player turn = ph.getPlayerTurn();
+            Combat combat = game.getCombat();
+            boolean noAttack = combat == null || combat.getAttackers().isEmpty();
+            return switch (step) {
+                case DRAW -> ph.getTurn() == 1 && game.getPlayers().size() == 2;
+                case COMBAT_BEGIN, COMBAT_DECLARE_ATTACKERS -> turn != null && turn.isSkippingCombat();
+                case COMBAT_DECLARE_BLOCKERS, COMBAT_DAMAGE -> noAttack;
+                case COMBAT_FIRST_STRIKE_DAMAGE -> noAttack || !anyFirstStrike(combat);
+                default -> false;
+            };
+        }
+
+        private static boolean anyFirstStrike(Combat combat) {
+            List<Card> fighting = new ArrayList<>(combat.getAttackers());
+            fighting.addAll(combat.getAllBlockers());
+            return fighting.stream().anyMatch(c -> c.hasFirstStrike() || c.hasDoubleStrike());
+        }
     }
 
     /** Plays the game on the calling thread, replaying {@code tape}, until it ends or reaches a new decision. */

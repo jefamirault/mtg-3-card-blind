@@ -111,10 +111,21 @@ class SolverTest {
         assertEquals("A wins on turn 10 (A's turn)", replay.get("end"));
         Map<String, Object> first = frames.get(0);
         assertEquals(1, first.get("turn"));
-        assertEquals(null, first.get("did"));
-        // every decision of the line is a step, and the last board has B at 0 life or less
-        long decisions = r.principalVariation().stream().filter(l -> !l.startsWith("=>") && !l.startsWith("(")).count();
-        assertEquals(decisions + 1, frames.size());
+        assertEquals("Untap", first.get("phase"));
+        assertEquals("A", first.get("active"));
+        assertEquals(List.of(), first.get("did"));
+        // turn 1 has no draw step, and B's turn, without an attack, has no blockers or damage steps
+        assertEquals(List.of("Untap", "Upkeep", "Main phase 1", "Beginning of combat", "Declare attackers", "Declare blockers",
+                "Combat damage", "End of combat", "Main phase 2", "End step", "Cleanup",
+                "Untap", "Upkeep", "Draw", "Main phase 1", "Beginning of combat", "Declare attackers", "End of combat",
+                "Main phase 2", "End step", "Cleanup", "Untap"),
+                frames.stream().limit(22).map(f -> f.get("phase")).toList());
+        assertEquals("B", frames.get(11).get("active"));
+        assertEquals(List.of("A priority: Play Mountain", "A priority: Cast Goblin Guide"), frames.get(2).get("did"));
+        // every decision of the line is in the step it was taken in, in order
+        List<String> decisions = r.principalVariation().stream().filter(l -> !l.startsWith("=>") && !l.startsWith("(")).toList();
+        assertEquals(decisions, frames.stream().flatMap(f -> ((List<String>) f.get("did")).stream()).toList());
+        // the last board has B at 0 life or less
         Map<String, Object> last = frames.get(frames.size() - 1);
         Map<String, Object> b = ((List<Map<String, Object>>) last.get("players")).get(1);
         assertTrue((Integer) b.get("life") <= 0, "B is dead at the end: " + b);
