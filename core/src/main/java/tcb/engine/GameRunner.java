@@ -178,7 +178,7 @@ public final class GameRunner {
             boolean noAttack = combat == null || combat.getAttackers().isEmpty();
             return switch (step) {
                 case DRAW -> ph.getTurn() == 1 && game.getPlayers().size() == 2;
-                case COMBAT_BEGIN, COMBAT_DECLARE_ATTACKERS -> turn != null && turn.isSkippingCombat();
+                case COMBAT_BEGIN, COMBAT_DECLARE_ATTACKERS -> turn != null && !turn.isInGame();
                 case COMBAT_DECLARE_BLOCKERS, COMBAT_DAMAGE -> noAttack;
                 case COMBAT_FIRST_STRIKE_DAMAGE -> noAttack || !anyFirstStrike(combat);
                 default -> false;
@@ -214,6 +214,9 @@ public final class GameRunner {
         Match match = new Match(rules, players, "3 Card Blind");
         Game game = match.createGame();
         game.setNoGUIUser();
+        // Forge's AI gives up at a wall-clock deadline (AI_TIMEOUT seconds). The decisions left to
+        // it must not depend on machine load, or replays could differ: make the deadline unreachable.
+        game.AI_TIMEOUT = (int) java.util.concurrent.TimeUnit.DAYS.toSeconds(1);
         if (created != null) {
             created.accept(game);
         }

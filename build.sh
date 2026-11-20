@@ -65,6 +65,9 @@ fi
 
 cd "$root"
 echo "building 3 Card Blind..."
+# Copied dependencies are only ever added, so a Forge version bump would leave both versions'
+# jars in lib/ and the launchers' lib/* classpath could load the old ones.
+rm -rf "$root"/*/target/lib
 mvn -B -q install -DskipTests
 touch "$root/target/build.stamp"  # ./local_server.sh rebuilds when sources are newer than this
 if [[ -n "$TEST" ]]; then

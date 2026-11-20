@@ -85,6 +85,7 @@ public final class ForgeEnv {
         @Override public boolean isRunningOnDesktop() { return true; }
         @Override public boolean isLibgdxPort() { return false; }
         @Override public String getCurrentVersion() { return "3cb-headless"; }
+        @Override public String getUserAgent() { return "3cb-headless"; }
         @Override public void invokeInEdtNow(Runnable runnable) { runnable.run(); }
         @Override public void invokeInEdtLater(Runnable runnable) { runnable.run(); }
         @Override public void invokeInEdtAndWait(Runnable proc) { proc.run(); }

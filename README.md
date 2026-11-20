@@ -192,7 +192,8 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
     quickly instead of running to the turn limit.
 - **Patches to Forge** (`patches/`, applied by `build.sh`):
   1. a `GameRules` flag that turns off the empty-library loss (rule 704.5b);
-  2. a per-thread `MyRandom`, so games can be solved in parallel and randomness can be intercepted;
+  2. `MyRandom.setRandomDirect`, so randomness can be intercepted (stock `MyRandom` is already
+     per-thread, but wraps every source in a counter that hides overridden `nextInt(bound)` etc.);
   3. per-thread, resettable id counters for abilities, triggers and effects. The stock counters
      are shared, non-atomic statics, so parallel games could hand out duplicate ids. Resetting
      them before every replay also keeps replays identical.
@@ -201,10 +202,9 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   5. the AI's forced-attacker check runs in order on the game thread instead of on a thread pool
      with a timeout, so the attack the AI falls back to (more than 64 possible assignments) is the
      same on every replay.
-  6. the AI's mana payment counts a storage land's "remove X counters: add one mana for each"
-     (Fountain of Cho, Saprazzan Skerry...) when it checks whether a spell can be paid for, and
-     removes just the counters the cost needs. Stock Forge only used these as rituals, so the
-     spells they pay for never showed up as castable.
+
+  The solver also sets each game's `AI_TIMEOUT` to a day, so the decisions left to Forge's AI
+  never stop at its wall-clock deadline and depend on machine load.
 
   The launchers run Java with `-XX:+DisableExplicitGC`: Forge calls `System.gc()` after every
   finished game, which stalls every solver thread.

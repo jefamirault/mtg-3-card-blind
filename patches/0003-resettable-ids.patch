@@ -1,5 +1,5 @@
 diff --git a/forge-game/src/main/java/forge/game/Game.java b/forge-game/src/main/java/forge/game/Game.java
-index 56e9e8fc..3c57e204 100644
+index 90e80e7160e..0dfc7626464 100644
 --- a/forge-game/src/main/java/forge/game/Game.java
 +++ b/forge-game/src/main/java/forge/game/Game.java
 @@ -65,8 +65,10 @@ public class Game {
@@ -16,10 +16,10 @@ index 56e9e8fc..3c57e204 100644
      private boolean noGUIUser;
  
 diff --git a/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java b/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
-index b5b396dc..09ef28f0 100644
+index fa5ebf3f122..fde0323f8fe 100644
 --- a/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
 +++ b/forge-game/src/main/java/forge/game/replacement/ReplacementEffect.java
-@@ -47,8 +47,10 @@ import forge.util.TextUtil;
+@@ -44,8 +44,10 @@ import forge.util.TextUtil;
   *
   */
  public abstract class ReplacementEffect extends TriggerReplacementBase {
@@ -33,13 +33,13 @@ index b5b396dc..09ef28f0 100644
      /** The ID. */
      private int id;
 diff --git a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
-index 3c5c70ab..a58d58ca 100644
+index 89e36d1808a..0a3caed9cc5 100644
 --- a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
 +++ b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
-@@ -75,8 +75,10 @@ import forge.game.zone.ZoneType;
-  * @version $Id$
-  */
- public abstract class SpellAbility extends CardTraitBase implements ISpellAbility, IIdentifiable, Comparable<SpellAbility> {
+@@ -88,8 +88,10 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
+         "CloakUp", "CumulativeUpkeep", "DisguiseUp", "ManifestUp", "MorphUp", "Unlock",
+     };
+ 
 -    private static int maxId = 0;
 -    private static int nextId() { return ++maxId; }
 +    // Per-thread and resettable so solver replays get identical ids (3 Card Blind patch).
@@ -50,7 +50,7 @@ index 3c5c70ab..a58d58ca 100644
      public static class EmptySa extends SpellAbility {
          public EmptySa(Card sourceCard) { super(sourceCard, Cost.Zero); setActivatingPlayer(sourceCard.getController());}
 diff --git a/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java b/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
-index bbee2448..636dacb1 100644
+index bbee24487bc..636dacb11a5 100644
 --- a/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
 +++ b/forge-game/src/main/java/forge/game/spellability/SpellAbilityStackInstance.java
 @@ -38,8 +38,10 @@ import forge.util.TextUtil;
@@ -67,7 +67,7 @@ index bbee2448..636dacb1 100644
      // At some point I want this functioning more like Target/Target Choices
      // where the SA has an "active"
 diff --git a/forge-game/src/main/java/forge/game/staticability/StaticAbility.java b/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
-index 2a8bbe57..af2b2727 100644
+index c5eaf7f0618..730c8e080fa 100644
 --- a/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
 +++ b/forge-game/src/main/java/forge/game/staticability/StaticAbility.java
 @@ -51,8 +51,10 @@ import forge.util.*;
@@ -84,10 +84,10 @@ index 2a8bbe57..af2b2727 100644
      private int id;
  
 diff --git a/forge-game/src/main/java/forge/game/trigger/Trigger.java b/forge-game/src/main/java/forge/game/trigger/Trigger.java
-index 743c627c..48c935ab 100644
+index 7f5a193954d..e149a669ab0 100644
 --- a/forge-game/src/main/java/forge/game/trigger/Trigger.java
 +++ b/forge-game/src/main/java/forge/game/trigger/Trigger.java
-@@ -52,8 +52,10 @@ import java.util.*;
+@@ -54,8 +54,10 @@ import java.util.function.Predicate;
   * @version $Id$
   */
  public abstract class Trigger extends TriggerReplacementBase {
@@ -100,7 +100,7 @@ index 743c627c..48c935ab 100644
  
      /**
       * <p>
-@@ -61,7 +63,7 @@ public abstract class Trigger extends TriggerReplacementBase {
+@@ -63,7 +65,7 @@ public abstract class Trigger extends TriggerReplacementBase {
       * </p>
       */
      public static void resetIDs() {

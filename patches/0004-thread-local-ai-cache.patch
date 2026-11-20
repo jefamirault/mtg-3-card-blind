@@ -1,5 +1,5 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiCache.java b/forge-ai/src/main/java/forge/ai/AiCache.java
-index b98f7def..75cc5e8c 100644
+index b98f7defca0..75cc5e8cbb7 100644
 --- a/forge-ai/src/main/java/forge/ai/AiCache.java
 +++ b/forge-ai/src/main/java/forge/ai/AiCache.java
 @@ -3,7 +3,6 @@ package forge.ai;

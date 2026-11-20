@@ -1,5 +1,5 @@
 diff --git a/forge-game/src/main/java/forge/game/GameRules.java b/forge-game/src/main/java/forge/game/GameRules.java
-index 6ed98858..596f5f3c 100644
+index 690364f91fb..e4de7fb31bf 100644
 --- a/forge-game/src/main/java/forge/game/GameRules.java
 +++ b/forge-game/src/main/java/forge/game/GameRules.java
 @@ -16,6 +16,7 @@ public class GameRules {
@@ -26,10 +26,10 @@ index 6ed98858..596f5f3c 100644
          return allowCheatShuffle;
      }
 diff --git a/forge-game/src/main/java/forge/game/player/Player.java b/forge-game/src/main/java/forge/game/player/Player.java
-index 26dc9f81..5c0fc259 100644
+index bc17c7f421d..e84e37495de 100644
 --- a/forge-game/src/main/java/forge/game/player/Player.java
 +++ b/forge-game/src/main/java/forge/game/player/Player.java
-@@ -2043,7 +2043,7 @@ public class Player extends GameEntity implements Comparable<Player> {
+@@ -2110,7 +2110,7 @@ public class Player extends GameEntity implements Comparable<Player> {
          if (triedToDrawFromEmptyLibrary) {
              triedToDrawFromEmptyLibrary = false; // one-shot check
              // Mine, Mine, Mine! prevents decking

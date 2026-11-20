@@ -1,34 +1,34 @@
 diff --git a/forge-core/src/main/java/forge/util/MyRandom.java b/forge-core/src/main/java/forge/util/MyRandom.java
-index aac8f65a..edfb1e80 100644
+index 086d1e1a1b9..94f38d07643 100644
 --- a/forge-core/src/main/java/forge/util/MyRandom.java
 +++ b/forge-core/src/main/java/forge/util/MyRandom.java
-@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicLong;
- public class MyRandom {
-     /** Constant <code>random</code>. */
-     private static final AtomicLong calls = new AtomicLong();
--    private static Random random = new CountingRandom(new SecureRandom());
-+    // Thread-local so independent games can be simulated deterministically in parallel (3 Card Blind solver).
-+    private static final ThreadLocal<Random> random = ThreadLocal.withInitial(() -> new CountingRandom(new SecureRandom()));
- 
-     /** Every Random method (nextInt, nextBoolean, shuffle, ...) funnels through next(bits). */
-     private static final class CountingRandom extends Random {
-@@ -60,7 +61,7 @@ public class MyRandom {
-      * @return the random
+@@ -61,15 +61,19 @@ public class MyRandom {
+      * evaluation helpers) continue the parent's stream instead of silently
+      * falling back to an unseeded one. Single-threaded behavior is unchanged.
       */
-     public static Random getRandom() {
--        return MyRandom.random;
-+        return MyRandom.random.get();
+-    private static final ThreadLocal<CountingRandom> random = new InheritableThreadLocal<CountingRandom>() {
++    // Typed Random, not CountingRandom, so setRandomDirect can install an unwrapped source (3 Card Blind solver).
++    private static final ThreadLocal<Random> random = new InheritableThreadLocal<Random>() {
+         @Override
+-        protected CountingRandom initialValue() {
++        protected Random initialValue() {
+             return new CountingRandom(new SecureRandom());
+         }
+     };
+ 
+     /** Number of random draws made so far on the current thread's stream. Used by undo to detect that randomness was consumed. */
+-    public static long callCount() { return random.get().callCount(); }
++    public static long callCount() {
++        final Random r = random.get();
++        return r instanceof CountingRandom ? ((CountingRandom) r).callCount() : 0;
++    }
+ 
+     // Debug only (-Dforge.undo.debug=true): tally draws by thread and call site, to find who consumes randomness.
+     private static final boolean TRACE = Boolean.getBoolean("forge.undo.debug");
+@@ -121,6 +125,15 @@ public class MyRandom {
+         MyRandom.random.set(random instanceof CountingRandom ? (CountingRandom) random : new CountingRandom(random));
      }
  
-     /**
-@@ -68,14 +69,23 @@ public class MyRandom {
-      * @param random the random
-      */
-     public static void setRandom(Random random) {
--        MyRandom.random = random instanceof CountingRandom ? random : new CountingRandom(random);
-+        MyRandom.random.set(random instanceof CountingRandom ? random : new CountingRandom(random));
-+    }
-+
 +    /**
 +     * Sets this thread's random provider without the call-counting wrapper, so overrides of
 +     * nextInt(bound), nextBoolean() etc. are seen. Used by the 3 Card Blind solver to turn random
@@ -36,14 +36,8 @@ index aac8f65a..edfb1e80 100644
 +     */
 +    public static void setRandomDirect(Random random) {
 +        MyRandom.random.set(random);
-     }
- 
++    }
++
      public static int[] splitIntoRandomGroups(final int value, final int numGroups) {
          int[] groups = new int[numGroups];
  
-         for (int i = 0; i < value; i++) {
--            groups[random.nextInt(numGroups)]++;
-+            groups[getRandom().nextInt(numGroups)]++;
-         }
- 
-         return groups;
