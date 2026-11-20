@@ -25,6 +25,12 @@ import tcb.engine.ForgeEnv;
  * lines wouldn't (so a name that's also a card's, like "Burn", still works). A block without a name gets one from its cards. {@code Name: ...} or {@code # ...}
  * as the first line names it explicitly.
  * {@code # notes:} lines become the entry's notes. {@link #export} writes this format.
+ * <p>
+ * A line with {@code |} in it is an entry of its own, cards separated by {@code |}, optionally
+ * with a name and a comma before the first card: {@code Sligh, Goblin Guide | 2 Mountain}. The
+ * comma only separates a name if what follows it is a card, so {@code Khan, Vengeful Heart | ...}
+ * is three cards. A first part with no comma is the name only if three cards follow it
+ * ({@code Sligh | Goblin Guide | Mountain | Mountain}). Several such lines in a row are several entries.
  */
 public final class EntryImport {
     private EntryImport() {
@@ -57,10 +63,13 @@ public final class EntryImport {
         List<String> lines = new ArrayList<>();
         for (String raw : (text + "\n").split("\\R", -1)) {
             String line = raw.strip();
-            if (line.isEmpty()) {
+            if (line.isEmpty() || isOneLineEntry(line)) {
                 if (!lines.isEmpty()) {
-                    blocks.add(block(lines));
+                    blocks.add(block(lines, false));
                     lines = new ArrayList<>();
+                }
+                if (!line.isEmpty()) {
+                    blocks.add(block(oneLineEntry(line), true));
                 }
             } else {
                 lines.add(line);
@@ -69,7 +78,59 @@ public final class EntryImport {
         return blocks;
     }
 
-    private static Block block(List<String> lines) {
+    /** {@code [Name,] Card | Card | Card}; '#' lines (notes, names) keep their text as it is. */
+    private static boolean isOneLineEntry(String line) {
+        return line.indexOf('|') >= 0 && !line.startsWith("#") && !EXPLICIT_NAME.matcher(line).matches();
+    }
+
+    /** A one-line entry as the lines of a block: {@code Name: ...} if it has a name, then a card per line. */
+    private static List<String> oneLineEntry(String line) {
+        List<String> lines = new ArrayList<>();
+        for (String part : line.split("\\|")) {
+            if (!part.isBlank()) {
+                lines.add(part.strip());
+            }
+        }
+        if (!lines.isEmpty()) {
+            String first = lines.get(0);
+            int comma = nameComma(first);
+            if (comma >= 0) {
+                lines.set(0, first.substring(comma + 1).strip());
+                lines.add(0, "Name: " + first.substring(0, comma).strip());
+            }
+        }
+        return lines;
+    }
+
+    /**
+     * Where a name ends in the first part of a one-line entry ("Sligh, Goblin Guide"), or -1 if it
+     * has none: the first comma that has a card (maybe counted) after it, unless the whole part is
+     * already a card, since card names have commas too ("Khan, Vengeful Heart").
+     */
+    private static int nameComma(String part) {
+        if (isCard(part)) {
+            return -1;
+        }
+        for (int i = part.indexOf(','); i > 0; i = part.indexOf(',', i + 1)) {
+            if (isCard(part.substring(i + 1))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Whether this line names a known card, with or without a count ("2 Mountain"). */
+    private static boolean isCard(String line) {
+        try {
+            List<String> cards = DeckList.parse("import", line.strip()).cards();
+            return !cards.isEmpty() && VintageValidator.lookup(cards.get(0)) != null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** @param oneLine a one-line entry: its name was found already, so an unknown first card stays a card */
+    private static Block block(List<String> lines, boolean oneLine) {
         List<String> notes = new ArrayList<>();
         List<String> body = new ArrayList<>();
         String name = null;
@@ -87,7 +148,7 @@ public final class EntryImport {
             if (explicit.matches()) {
                 name = explicit.group(1).strip();
                 body.remove(0);
-            } else if (body.size() > 1 && !COUNTED.matcher(first).matches() && firstLineIsName(body)) {
+            } else if (body.size() > 1 && !COUNTED.matcher(first).matches() && firstLineIsName(body, oneLine)) {
                 name = first;
                 body.remove(0);
             }
@@ -106,11 +167,11 @@ public final class EntryImport {
         return new Block(name, cards, String.join("\n", notes), problems, generated);
     }
 
-    private static boolean firstLineIsName(List<String> body) {
+    private static boolean firstLineIsName(List<String> body, boolean oneLine) {
         int with = cardCount(body);
         int without = cardCount(body.subList(1, body.size()));
         return (without == VintageValidator.DECK_SIZE && with != VintageValidator.DECK_SIZE)
-                || VintageValidator.lookup(body.get(0)) == null;
+                || (!oneLine && VintageValidator.lookup(body.get(0)) == null);
     }
 
     /** Cards in these lines, or -1 if they don't parse. */

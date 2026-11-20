@@ -86,6 +86,61 @@ class EntryImportTest {
     }
 
     @Test
+    void oneLineEntrySeparatesCardsWithBars() {
+        // "Khan, Vengeful Heart" has a comma but is a card, not a name before one
+        Block b = EntryImport.parse("Khan, Vengeful Heart | Sickening Shoal | Bottomless Vault").get(0);
+        assertEquals(List.of("Khan, Vengeful Heart", "Sickening Shoal", "Bottomless Vault"), b.cards());
+        assertTrue(b.generated());
+        assertEquals(List.of(), b.problems());
+    }
+
+    @Test
+    void oneLineEntryCanStartWithAName() {
+        Block b = EntryImport.parse("Sligh, Goblin Guide | 2 Mountain").get(0);
+        assertEquals(new Block("Sligh", List.of("Goblin Guide", "Mountain", "Mountain"), "", List.of()), b);
+        // a name that's also a card, and a card with a comma after the name
+        assertEquals("Burn", EntryImport.parse("Burn, Lightning Bolt|Lightning Bolt|Lightning Bolt").get(0).name());
+        Block khan = EntryImport.parse("Khan deck, Khan, Vengeful Heart | Island | Island").get(0);
+        assertEquals("Khan deck", khan.name());
+        assertEquals(List.of("Khan, Vengeful Heart", "Island", "Island"), khan.cards());
+    }
+
+    @Test
+    void oneLineEntriesInARowAreSeparateEntries() {
+        List<Block> blocks = EntryImport.parse("""
+                Goblin Guide | Mountain | Mountain
+                Swords, Plains | Plains | Swords to Plowshares
+                Sligh
+                2 Mountain
+                Goblin Guide
+                Islands, 3 Island | 
+                """);
+        assertEquals(4, blocks.size());
+        assertEquals("GoblMounMoun", blocks.get(0).name());
+        assertEquals("Swords", blocks.get(1).name());
+        assertEquals(List.of("Plains", "Plains", "Swords to Plowshares"), blocks.get(1).cards());
+        // the block before a one-line entry ends there, blank line or not
+        assertEquals(new Block("Sligh", List.of("Mountain", "Mountain", "Goblin Guide"), "", List.of()), blocks.get(2));
+        assertEquals(new Block("Islands", List.of("Island", "Island", "Island"), "", List.of()), blocks.get(3));
+    }
+
+    @Test
+    void oneLineEntryKeepsAnUnknownFirstCardWhole() {
+        // no comma has a card after it, so nothing is split off and validation reports the card
+        Block b = EntryImport.parse("Sligh, Goblin Guid | Mountain | Mountain").get(0);
+        assertEquals(List.of("Sligh, Goblin Guid", "Mountain", "Mountain"), b.cards());
+        assertTrue(b.generated());
+    }
+
+    @Test
+    void oneLineEntryNameWithoutACommaNeedsThreeCardsAfterIt() {
+        assertEquals("Sligh", EntryImport.parse("Sligh | Goblin Guide | Mountain | Mountain").get(0).name());
+        // a misspelled card stays a card (and fails validation) instead of becoming the name
+        Block b = EntryImport.parse("Goblin Guid | Mountain | Mountain").get(0);
+        assertEquals(List.of("Goblin Guid", "Mountain", "Mountain"), b.cards());
+    }
+
+    @Test
     void exportReadsBackTheSame() {
         List<EntryFile> entries = List.of(
                 new EntryFile(DeckList.of("Sligh", "Mountain", "Mountain", "Goblin Guide"), null, null, "fast\nhaste"),

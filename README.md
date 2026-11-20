@@ -74,7 +74,9 @@ Goblin Guide, Mountain, Mountain is `GoblMounMoun` or `GodeMoinMoin`); click one
 *Import or export entries* (under the form) adds many entries from pasted text or a
 `.txt` file, with a preview of what each will do first, and saves every entry to one file in the
 same format: blank lines between entries, each a name (or `Name: ...`) followed by its cards and
-any `# notes:` lines. An entry without a name gets the form's first suggested name (`GoblMounMoun`), with a number added if an entry with other cards already has that name. `./tcb tournament --from-file FILE` runs a field from such a file. The search box above the list
+any `# notes:` lines. An entry can also be one line, cards separated by `|`, with an optional
+name and comma first: `Sligh, Goblin Guide | 2 Mountain` (a comma only ends the name if a card
+follows it, so `Khan, Vengeful Heart | Island | Island` is three cards). An entry without a name gets the form's first suggested name (`GoblMounMoun`), with a number added if an entry with other cards already has that name. `./tcb tournament --from-file FILE` runs a field from such a file. The search box above the list
 filters the entries with Scryfall-style syntax (`t:creature -c:u`, `lands>=2`, `card="black lotus"`,
 `added>=2026-10`, `or` and parentheses; *Search syntax* lists it all), keeps the query in the URL,
 and the card view's *Entries with this card* searches for that card. Tick the entries to include to run a
