@@ -2010,6 +2010,8 @@ function renderResults(r, treesId = null, replayId = null) {
     const verdict = winner ? `${winner} wins` : certainDraw ? "Draw"
       : `${g.a} ${(100 * g.pWinA).toFixed(0)}%, draw ${(100 * g.pDraw).toFixed(0)}%, ${g.b} ${(100 * g.pWinB).toFixed(0)}%`;
     const cls = certainDraw || !winner ? "draw" : "win";
+    // a search that ran out of budget (or was stopped) before any result saves only a note, no moves
+    const noLine = g.line.every((s) => /^\(.*\)$/.test(s));
     const steps = g.line.map((s) => s.startsWith("=>")
       ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " ")
         .replace(/\(([AB])'s turn\)/, (_, p) => `(${p === "A" ? g.a : g.b}'s turn)`))
@@ -2018,10 +2020,15 @@ function renderResults(r, treesId = null, replayId = null) {
       el("summary", {},
         el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
         el("span", { class: "verdict " + cls }, verdict),
-        g.complete ? null : el("span", { class: "unproven" }, `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`),
+        g.complete ? null : el("span", { class: "unproven" },
+          noLine ? "no result" : `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`),
         g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
       el("ol", { class: "line" }, ...steps),
-      replayId ? watchButton(replayId, k, g) : null,
+      !replayId ? null : noLine
+        ? el("p", { class: "caption" }, /stopped/.test(g.line.join(" "))
+          ? "No line to watch: the search was stopped before it had a result."
+          : "No line to watch: the search ran out of its time or node budget before it had a result.")
+        : watchButton(replayId, k, g),
       treesId ? treeBrowser(treesId, k, g) : null);
   });
 
