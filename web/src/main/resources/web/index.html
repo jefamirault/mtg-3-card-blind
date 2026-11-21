@@ -80,6 +80,9 @@
     padding: 1.75rem clamp(1rem, 4vw, 3rem) 4rem;
   }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  /* a wide matchup table scrolls in its own box instead of widening the page */
+  main > section { min-width: 0; }
+  @media (max-width: 860px) { main > .requests { order: 1; } } /* the public site: results first on a phone */
   h2 { font-size: 1.35rem; margin: 0 0 .9rem; font-weight: 600; }
   h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; font-weight: 600; }
 
@@ -422,6 +425,25 @@
   .views a[aria-current=page] { color: var(--ink); border-bottom-color: var(--action); }
   main[hidden], #stats[hidden] { display: none; }
 
+  /* --- the public site (SiteExport): read-only, plus the request form --- */
+  html[data-mode=public] .local-only { display: none !important; }
+  html:not([data-mode=public]) .public-only { display: none !important; }
+  .requests fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: .3rem; }
+  .requests legend { font-size: .85rem; color: var(--ink-soft); padding: 0; margin-bottom: .3rem; }
+  .requests label.check { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .95rem; }
+  .req-deck { display: grid; gap: .4rem; }
+  .req-deck[hidden] { display: none; }
+  .req-deck h3 { margin: .4rem 0 0; font-size: .95rem; }
+  .req-slots { display: grid; gap: .4rem; }
+  .req-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  .req-sent { margin: 0; color: var(--win); font-size: .92rem; }
+  .queue { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); font-size: .92rem; }
+  .queue li { padding: .45rem 0; border-bottom: 1px solid var(--rule); display: grid; gap: .15rem; }
+  .queue .q-head { display: flex; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+  .queue .q-status { font-size: .82rem; font-weight: 600; white-space: nowrap; }
+  .queue .q-status.waiting { color: var(--ink-soft); } .queue .q-status.solved { color: var(--win); } .queue .q-status.declined { color: var(--loss); }
+  .queue .q-reply { color: var(--ink-soft); font-size: .85rem; }
+
   /* --- stats: what the app stores --- */
   #stats { padding: 1.75rem clamp(1rem, 4vw, 3rem) 4rem; max-width: 72rem; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .7rem; margin: 0 0 1.2rem; }
@@ -456,46 +478,89 @@
   <div>
     <h1>3 Card Blind</h1>
     <p>Each player picks three Vintage-legal cards. Every matchup is solved with perfect play on both sides, so the best deck wins.</p>
+    <p class="public-only">These tournaments were solved on the author's computer. Watch any game, or ask for a deck or a matchup to be solved next.</p>
   </div>
   <div class="controls">
-    <div class="buttons">
+    <div class="buttons local-only">
       <button class="secondary" id="stop" type="button" hidden>Stop</button>
       <button class="primary" id="run" type="button">Run tournament</button>
     </div>
     <details class="settings" id="settings">
-      <summary>Search settings</summary>
+      <summary><span class="local-only">Search settings</span><span class="public-only">Scoring</span></summary>
       <div class="settings-grid">
-        <label for="opt-time">Time per game (seconds)</label>
-        <input type="number" id="opt-time" min="1" max="86400" step="1">
-        <label for="opt-nodes">Node budget per game</label>
-        <input type="number" id="opt-nodes" min="1000" max="1000000000" step="1000">
-        <label for="opt-turns" title="Turns of each player: turn 3 is each player's third turn">Turn limit</label>
-        <input type="number" id="opt-turns" min="1" max="100" step="1">
-        <label for="opt-exact">Exact turns</label>
-        <input type="checkbox" id="opt-exact">
-        <label for="opt-trees">Save search trees</label>
-        <input type="checkbox" id="opt-trees">
+        <label class="local-only" for="opt-time">Time per game (seconds)</label>
+        <input class="local-only" type="number" id="opt-time" min="1" max="86400" step="1">
+        <label class="local-only" for="opt-nodes">Node budget per game</label>
+        <input class="local-only" type="number" id="opt-nodes" min="1000" max="1000000000" step="1000">
+        <label class="local-only" for="opt-turns" title="Turns of each player: turn 3 is each player's third turn">Turn limit</label>
+        <input class="local-only" type="number" id="opt-turns" min="1" max="100" step="1">
+        <label class="local-only" for="opt-exact">Exact turns</label>
+        <input class="local-only" type="checkbox" id="opt-exact">
+        <label class="local-only" for="opt-trees">Save search trees</label>
+        <input class="local-only" type="checkbox" id="opt-trees">
         <label for="opt-scoring" title="Points for a win, a draw and a loss">Scoring</label>
         <select id="opt-scoring">
           <option value="3-1-0">3 / 1 / 0</option>
           <option value="2-1-0">2 / 1 / 0, %</option>
         </select>
-        <p class="hint">Games still going at the turn limit are draws, but the search goes on past it, up to 4 times the limit, in case a player wins slowly. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
-        <p class="hint">Save search trees keeps every game's searched tree to browse afterwards. It's for small tournaments (up to 8 entries): each game's tree can take a few MB, and cached games are solved again.</p>
+        <p class="hint local-only">Games still going at the turn limit are draws, but the search goes on past it, up to 4 times the limit, in case a player wins slowly. Exact turns is slower, but exact for games decided near the limit. A game that runs out of time or nodes is scored as an unproven draw.</p>
+        <p class="hint local-only">Save search trees keeps every game's searched tree to browse afterwards. It's for small tournaments (up to 8 entries): each game's tree can take a few MB, and cached games are solved again.</p>
         <p class="hint">Scoring gives points for a win, a draw and a loss. It doesn't change any game, so it re-scores saved tournaments too. 2 / 1 / 0 is 3cardblind.com's scoring (a draw is half a win), and shows each deck's points as a percentage of the points it could have scored.</p>
-        <button type="button" class="reset" id="opt-reset">Reset to defaults</button>
+        <button type="button" class="reset local-only" id="opt-reset">Reset to defaults</button>
       </div>
     </details>
   </div>
 </header>
 
-<nav class="views" aria-label="Views">
+<nav class="views local-only" aria-label="Views">
   <a href="#" id="view-main">Tournament</a>
   <a href="#stats" id="view-stats">Stats</a>
 </nav>
 
 <main>
-  <section aria-labelledby="entries-h">
+  <section class="public-only requests" aria-labelledby="requests-h">
+    <h2 id="requests-h">Request a deck or matchup</h2>
+    <form id="request" autocomplete="off" novalidate>
+      <fieldset>
+        <legend>What to solve</legend>
+        <label class="check"><input type="radio" name="req-kind" value="deck" checked> A deck, for the next tournament</label>
+        <label class="check"><input type="radio" name="req-kind" value="matchup"> A matchup of two decks</label>
+      </fieldset>
+      <div class="req-deck">
+        <h3 class="req-matchup-only" hidden>First deck</h3>
+        <label for="req-name-0">Deck name (optional)</label>
+        <input type="text" id="req-name-0" maxlength="40">
+        <label for="req-0-0">Cards</label>
+        <div class="req-slots">
+          <input type="text" id="req-0-0" list="req-names" aria-label="First deck, first card">
+          <input type="text" id="req-0-1" list="req-names" aria-label="First deck, second card">
+          <input type="text" id="req-0-2" list="req-names" aria-label="First deck, third card">
+        </div>
+      </div>
+      <div class="req-deck" id="req-deck-1" hidden>
+        <h3>Second deck</h3>
+        <label for="req-name-1">Deck name (optional)</label>
+        <input type="text" id="req-name-1" maxlength="40">
+        <label for="req-1-0">Cards</label>
+        <div class="req-slots">
+          <input type="text" id="req-1-0" list="req-names" aria-label="Second deck, first card">
+          <input type="text" id="req-1-1" list="req-names" aria-label="Second deck, second card">
+          <input type="text" id="req-1-2" list="req-names" aria-label="Second deck, third card">
+        </div>
+      </div>
+      <datalist id="req-names"></datalist>
+      <label for="req-note">Note to the author (optional, not shown on the site)</label>
+      <textarea id="req-note" maxlength="500" rows="2"></textarea>
+      <div class="req-trap" aria-hidden="true"><label for="req-website">Leave this empty</label><input type="text" id="req-website" tabindex="-1"></div>
+      <ul class="problems" id="req-problems" aria-live="polite"></ul>
+      <div class="form-buttons"><button class="primary" type="submit" id="req-submit">Send request</button></div>
+      <p class="req-sent" id="req-sent" aria-live="polite"></p>
+    </form>
+    <h3>Requests</h3>
+    <ul class="queue" id="queue"><li class="empty">Loading…</li></ul>
+  </section>
+
+  <section class="local-only" aria-labelledby="entries-h">
     <h2 id="entries-h">Entries</h2>
     <form id="add" autocomplete="off">
       <p class="editing-note" id="editing-note" hidden></p>
@@ -622,7 +687,12 @@ const showProblems = (target, problems) => {
   target.replaceChildren(...(problems || []).map((p) => el("li", {}, p)));
 };
 
+// The public site (written by SiteExport) has no server behind it, apart from the request queue:
+// its page is marked data-mode="public", reads results from static files and can't change anything.
+const PUBLIC = document.documentElement.dataset.mode === "public";
+
 async function api(method, path, body) {
+  if (PUBLIC) return staticApi(method, path, body);
   const res = await fetch(path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : {},
@@ -630,6 +700,51 @@ async function api(method, path, body) {
   });
   const data = await res.json().catch(() => ({}));
   return { ok: res.ok, data };
+}
+
+// The public site's answer to an API call: the exported file for it (paths are relative, so the
+// site works from any folder), or the request service for the request queue.
+async function staticApi(method, path, body) {
+  let m, url, gz = false;
+  if (path === "/api/requests" && method === "POST") {
+    url = "api/requests";
+  } else if (method !== "GET") {
+    return { ok: false, data: { error: "This site is read-only." } };
+  } else if (path === "/api/requests/queue") url = "api/requests/queue";
+  else if (path === "/api/history") url = "data/history.json";
+  else if ((m = /^\/api\/history\/([^/]+)\/games\/(\d+)\/replay$/.exec(path))) { url = `data/replays/${m[1]}/${m[2]}.json.gz`; gz = true; }
+  else if ((m = /^\/api\/history\/([^/]+)\/trees\/(\d+)$/.exec(path))) { url = `data/trees/${m[1]}/${m[2]}.json.gz`; gz = true; }
+  else if ((m = /^\/api\/history\/([^/]+)$/.exec(path))) url = `data/history/${m[1]}.json`;
+  else if ((m = /^\/api\/cards\?q=(.*)$/.exec(path))) return { ok: true, data: await searchCardNames(decodeURIComponent(m[1])) };
+  else return { ok: false, data: { error: "That isn't available on this site." } };
+  try {
+    const res = await fetch(url, body ? { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+    const data = gz && res.ok ? await gunzipJson(res) : await res.json().catch(() => ({}));
+    if (!res.ok && !data.error) data.error = res.status === 404 ? "Not found on this site." : `The site answered ${res.status}.`;
+    return { ok: res.ok, data };
+  } catch {
+    return { ok: false, data: { error: "Couldn't reach the site. Check your connection and try again." } };
+  }
+}
+// Gzipped JSON (replays and search trees). A server that sends it with Content-Encoding: gzip has
+// unzipped it already, so look at the bytes first.
+async function gunzipJson(res) {
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return JSON.parse(new TextDecoder().decode(bytes));
+  return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).json();
+}
+// Card names for autocomplete, ranked like the server's /api/cards: exact, then a word starting
+// with the text, then anywhere; shorter names first.
+let cardNameList = null;
+async function searchCardNames(q) {
+  const needle = q.trim().toLowerCase();
+  if (needle.length < 2) return [];
+  if (!cardNameList) cardNameList = fetch("data/cards.json").then((r) => r.json()).catch(() => { cardNameList = null; return []; });
+  const names = await cardNameList;
+  const rank = (n) => { const l = n.toLowerCase(); return l === needle ? 0 : l.startsWith(needle) || l.includes(" " + needle) || l.includes("-" + needle) ? 1 : 2; };
+  return names.filter((n) => n.toLowerCase().includes(needle))
+    .sort((a, b) => rank(a) - rank(b) || a.length - b.length || a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .slice(0, 12);
 }
 
 // ---- entry search (Scryfall-style; no DOM in this block, so it can be tested on its own)
@@ -1521,7 +1636,7 @@ function renderHistory() {
       await loadHistory();
       showSaved();
     });
-    return el("li", { "aria-current": String(h.id === shown) }, view, del);
+    return el("li", { "aria-current": String(h.id === shown) }, view, PUBLIC ? null : del);
   }));
 }
 
@@ -2028,6 +2143,7 @@ function renderResults(r, treesId = null, replayId = null) {
         ? el("p", { class: "caption" }, /stopped/.test(g.line.join(" "))
           ? "No line to watch: the search was stopped before it had a result."
           : "No line to watch: the search ran out of its time or node budget before it had a result.")
+        : g.replay === false ? el("p", { class: "caption" }, "This game can't be watched: the engine has changed since it was solved, and no longer plays its line the same way.")
         : watchButton(replayId, k, g),
       treesId ? treeBrowser(treesId, k, g) : null);
   });
@@ -2185,9 +2301,85 @@ function renderStats(s) {
   ];
 }
 
-showView();
-loadEntries();
-loadHistory().then(poll);
+// ---- requests (public site): a deck or a matchup to solve, sent to the request service
+const reqInputs = [0, 1].map((d) => [0, 1, 2].map((i) => $(`#req-${d}-${i}`)));
+const reqKind = () => document.querySelector("input[name=req-kind]:checked").value;
+function showReqKind() {
+  const matchup = reqKind() === "matchup";
+  $("#req-deck-1").hidden = !matchup;
+  for (const h of document.querySelectorAll(".req-matchup-only")) h.hidden = !matchup;
+}
+for (const r of document.querySelectorAll("input[name=req-kind]")) r.addEventListener("change", showReqKind);
+let reqTimer;
+for (const input of reqInputs.flat()) {
+  input.addEventListener("input", () => {
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(async () => {
+      const typed = input.value.trim();
+      const names = await searchCardNames(typed);
+      if (input.value.trim() === typed) $("#req-names").replaceChildren(...names.map((n) => el("option", { value: n })));
+    }, 150);
+  });
+}
+// Each deck's name and cards, in the cards' own spelling; problems for anything that isn't a card.
+async function reqDecks() {
+  const problems = [], decks = [];
+  for (let d = 0; d < (reqKind() === "matchup" ? 2 : 1); d++) {
+    const cards = [];
+    for (const input of reqInputs[d]) {
+      const typed = input.value.trim();
+      if (!typed) { problems.push(`${d ? "Second" : "First"} deck: fill in all three cards.`); break; }
+      const exact = (await searchCardNames(typed)).find((n) => n.toLowerCase() === typed.toLowerCase());
+      if (!exact) { problems.push(`"${typed}" isn't a Vintage-legal card.`); continue; }
+      input.value = exact;
+      cards.push(exact);
+    }
+    decks.push({ name: $(`#req-name-${d}`).value.trim(), cards });
+  }
+  return { decks, problems };
+}
+$("#request").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#req-sent").textContent = "";
+  const button = $("#req-submit");
+  button.disabled = true;
+  button.textContent = "Sending…";
+  try {
+    const { decks, problems } = await reqDecks();
+    if (problems.length) { showProblems($("#req-problems"), problems); return; }
+    const { ok, data } = await api("POST", "/api/requests",
+      { kind: reqKind(), decks, note: $("#req-note").value.trim(), website: $("#req-website").value });
+    if (!ok) { showProblems($("#req-problems"), data.problems || [data.error || "Couldn't send the request."]); return; }
+    showProblems($("#req-problems"), []);
+    $("#req-sent").textContent = data.duplicate ? "That's already been requested; it's in the list below." : "Thanks! Your request is in the list below.";
+    for (const input of [...reqInputs.flat(), $("#req-name-0"), $("#req-name-1"), $("#req-note")]) input.value = "";
+    loadQueue();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Send request";
+  }
+});
+const REQ_STATUS = { waiting: "Waiting", solved: "Solved", declined: "Declined" };
+async function loadQueue() {
+  const list = $("#queue");
+  const { ok, data } = await api("GET", "/api/requests/queue");
+  if (!ok) { list.replaceChildren(el("li", { class: "empty" }, "The request list isn't available right now.")); return; }
+  if (!data.length) { list.replaceChildren(el("li", { class: "empty" }, "No requests yet.")); return; }
+  list.replaceChildren(...data.map((r) => el("li", {},
+    el("div", { class: "q-head" },
+      el("span", {}, r.decks.map((d) => (d.name ? d.name + ": " : "") + d.cards.join(", ")).join("  vs  ")),
+      el("span", { class: "q-status " + r.status }, REQ_STATUS[r.status] || r.status)),
+    el("span", { class: "q-reply" }, `${r.kind === "matchup" ? "Matchup" : "Deck"}, asked ${when(r.at)}` + (r.reply ? ` · ${r.reply}` : "")))));
+}
+
+if (PUBLIC) {
+  loadHistory().then(() => render({ state: "idle" }));
+  loadQueue();
+} else {
+  showView();
+  loadEntries();
+  loadHistory().then(poll);
+}
 </script>
 </body>
 </html>

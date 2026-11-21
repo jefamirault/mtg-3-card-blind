@@ -26,7 +26,6 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import com.google.gson.Gson;
@@ -35,16 +34,12 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import forge.game.GameFormat;
-import forge.item.PaperCard;
-import forge.model.FModel;
 import tcb.deck.DeckList;
 import tcb.deck.EntryFile;
 import tcb.deck.EntryImport;
 import tcb.deck.VintageValidator;
 import tcb.engine.ForgeEnv;
 import tcb.engine.NondeterministicReplayException;
-import tcb.solve.GameReplay;
 import tcb.solve.ResultCache;
 import tcb.solve.ResultsJson;
 import tcb.solve.Solver;
@@ -99,17 +94,7 @@ public final class WebServer {
         this.historyDir = historyDir;
         this.cache = cache;
         this.threads = threads;
-        // Vintage-legal card names for autocomplete
-        GameFormat vintage = FModel.getFormats().getVintage();
-        Predicate<PaperCard> legal = vintage.getFilterRules();
-        TreeSet<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        for (PaperCard card : FModel.getMagicDb().getCommonCards().getUniqueCards()) {
-            if (legal.test(card) && !vintage.getBannedCardNames().contains(card.getName())
-                    && VintageValidator.hasTournamentLegalPrinting(vintage, card.getName())) {
-                names.add(card.getName());
-            }
-        }
-        this.cardNames = new ArrayList<>(names);
+        this.cardNames = SavedTournament.vintageCardNames(); // for autocomplete
     }
 
     public static void main(String[] args) throws IOException {
@@ -685,26 +670,7 @@ public final class WebServer {
         List<Map<String, Object>> out = new ArrayList<>();
         try (Stream<Path> files = Files.list(historyDir)) {
             for (Path f : files.filter(p -> p.toString().endsWith(".json")).sorted(Comparator.reverseOrder()).toList()) {
-                JsonObject saved = GSON.fromJson(Files.readString(f), JsonObject.class);
-                JsonObject results = saved.getAsJsonObject("results");
-                List<String> entries = new ArrayList<>();
-                results.getAsJsonArray("entries").forEach(e -> entries.add(e.getAsJsonObject().get("name").getAsString()));
-                // Each entry's record, without points: the page ranks them by its own scoring.
-                List<Map<String, Object>> records = new ArrayList<>();
-                for (var s : results.getAsJsonArray("standings")) {
-                    JsonObject o = s.getAsJsonObject();
-                    records.add(Map.of("name", o.get("name").getAsString(), "wins", o.get("wins").getAsDouble(),
-                            "draws", o.get("draws").getAsDouble(), "losses", o.get("losses").getAsDouble()));
-                }
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("id", saved.get("id").getAsString());
-                m.put("finished", saved.get("finished").getAsString());
-                m.put("seconds", saved.get("seconds").getAsDouble());
-                m.put("entries", entries);
-                m.put("games", results.getAsJsonArray("games").size());
-                m.put("notPlayed", results.has("notPlayed") ? results.getAsJsonArray("notPlayed").size() : 0);
-                m.put("standings", records);
-                out.add(m);
+                out.add(SavedTournament.summary(GSON.fromJson(Files.readString(f), JsonObject.class)));
             }
         }
         return out;
@@ -766,7 +732,7 @@ public final class WebServer {
 
     /**
      * The board at every step of a saved game's optimal line, for the animated replay: the game
-     * is replayed in Forge along the saved line (see GameReplay).
+     * is replayed in Forge along the saved line (see SavedTournament#replay).
      */
     private void replayGame(HttpExchange ex, String id, int game) throws IOException {
         if (!validId(id) || !Files.exists(historyFile(id))) {
@@ -774,27 +740,12 @@ public final class WebServer {
             return;
         }
         JsonObject saved = GSON.fromJson(Files.readString(historyFile(id)), JsonObject.class);
-        JsonObject results = saved.getAsJsonObject("results");
-        if (game >= results.getAsJsonArray("games").size()) {
+        if (game >= SavedTournament.games(saved)) {
             sendJson(ex, 404, Map.of("error", "No game " + game + " in that tournament."));
             return;
         }
-        JsonObject g = results.getAsJsonArray("games").get(game).getAsJsonObject();
-        DeckList a = savedDeck(results, g.get("a").getAsString());
-        DeckList b = savedDeck(results, g.get("b").getAsString());
-        int startingPlayer = g.get("onThePlay").getAsString().equals(a.name()) ? 0 : 1;
-        List<String> line = new ArrayList<>();
-        g.getAsJsonArray("line").forEach(l -> line.add(l.getAsString()));
-        // Older saves have maxTurns (Forge turns); newer ones turns (turn cycles).
-        JsonObject o = saved.has("options") ? saved.getAsJsonObject("options") : new JsonObject();
-        int turnLimit = o.has("turns") ? Turns.forgeTurns(o.get("turns").getAsInt())
-                : o.has("maxTurns") ? o.get("maxTurns").getAsInt() : DEFAULTS.maxTurns();
-        // A slow win found past the limit was solved, and has to be replayed, with a higher one.
-        if (g.has("provenTurns")) {
-            turnLimit = Math.max(turnLimit, Turns.forgeTurns(g.get("provenTurns").getAsInt()));
-        }
         try {
-            sendJson(ex, 200, GameReplay.replay(a, b, startingPlayer, line, turnLimit));
+            sendJson(ex, 200, SavedTournament.replay(saved, game));
         } catch (RuntimeException e) {
             if (!NondeterministicReplayException.causedBy(e)) {
                 throw e;
@@ -802,18 +753,6 @@ public final class WebServer {
             sendJson(ex, 409, Map.of("error", "This game can't be replayed: the engine no longer plays its saved line"
                     + " the same way (the solver has changed since it was saved). " + e.getMessage()));
         }
-    }
-
-    private static DeckList savedDeck(JsonObject results, String name) {
-        for (var e : results.getAsJsonArray("entries")) {
-            JsonObject entry = e.getAsJsonObject();
-            if (entry.get("name").getAsString().equals(name)) {
-                List<String> cards = new ArrayList<>();
-                entry.getAsJsonArray("cards").forEach(c -> cards.add(c.getAsString()));
-                return new DeckList(name, cards);
-            }
-        }
-        throw new IllegalStateException("saved tournament has no entry called " + name);
     }
 
     /** One game's saved search tree, sent as stored: gzipped JSON (see SearchTree#toGzipJson). */

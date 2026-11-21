@@ -36,6 +36,20 @@ it safely.
 - The `forge/` submodule always shows as modified (`m forge`): `build.sh` applies `patches/*.patch`
   to its working tree. That's expected; never commit the submodule pointer for it.
 
+## The public site (`site/`)
+
+- `index.html` is also the public page: `SiteExport` marks it `data-mode="public"`, and in that
+  mode `api()` reads static files instead (`staticApi`). Mark anything that edits or runs things
+  `local-only` (CSS hides it there), and public-only additions `public-only`. A new API call the
+  public page needs has to be exported and mapped in `staticApi`.
+- Test it without a server: export to a scratch folder (`java -cp "web/target/classes:core/target/classes:web/target/lib/*"
+  -Dtcb.forgeGuiDir=$PWD/forge/forge-gui tcb.web.SiteExport --out <scratch>`), run
+  `site/requests/server.js` with `PORT`, `TOKEN`, `DATA_DIR`, `CARDS_FILE`, and serve the folder
+  with a small proxy passing `/api/requests` to it. `site/requests.sh` takes `TCB_SITE_ENV` (a
+  settings file with `REQUESTS_URL`) to talk to that instead.
+- Deploys (`site/deploy.sh`) and server setup are the user's to run. `site/.env` holds the request
+  key; it's git-ignored, as are `site/public/` and `requests/`.
+
 ## Changing Forge
 
 - Edit under `forge/`, then save the change as the next numbered patch:

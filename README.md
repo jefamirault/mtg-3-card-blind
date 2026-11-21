@@ -90,6 +90,39 @@ finished games are kept and saved, and the rest are listed as not played. Click 
 entry's hand or in the standings to see its Scryfall scan, rules text and format legality (fetched
 from the Scryfall API in the browser; click a double-faced card's scan to turn it over).
 
+### Public site
+
+`site/` publishes the results as a read-only website: anyone can browse the saved tournaments,
+watch the games and browse saved search trees, and ask for a deck or a matchup to be solved.
+Solving stays on this machine; the site has no Forge and no solver.
+
+```sh
+cp site/env.example site/.env   # fill in the server, domain and a request key
+site/deploy.sh --dry-run        # export history/ into site/public/, show what would change
+site/deploy.sh                  # export and upload
+site/deploy.sh --requests       # also install or update the request service
+site/requests.sh                # list the waiting requests, saving their decks to import
+site/requests.sh solved ID "In the Nov 22 tournament"   # or: declined ID [reply], waiting ID
+```
+
+- **Export** (`tcb.web.SiteExport`, run by `deploy.sh` from the built jars): writes `index.html`
+  in its public mode (`<html data-mode="public">`: no entries, no running tournaments, no deleting)
+  and static JSON in `site/public/data/` — the list of tournaments, each saved file, every game's
+  replay (gzipped; the page unzips them) and, with `-- --trees`, the search trees. Replays are made
+  here, since the site can't run Forge: a game whose line the current engine no longer plays the
+  same way gets no replay and says so. An unchanged tournament keeps its replays from the last
+  export. `-- --only ID,ID` publishes only those tournaments.
+- **Requests** (`site/requests/server.js`, Node with no dependencies, behind nginx at
+  `/api/requests`): visitors send a deck, or a matchup of two, with an optional note. It checks the
+  cards against the exported card list, merges a request already waiting, limits requests per
+  visitor per day (by a hash of the address, which isn't stored), and lists them on the site
+  without their notes. `site/requests.sh` collects them with the key in `site/.env`: it saves all
+  of them in `requests/requests.json` and the waiting decks in `requests/waiting.txt`, one line
+  per deck in the import format, ready to paste into *Import or export entries*.
+- **Server**: `site/nginx.conf` is the site config (`3cb.jefamirault.com` on the shared droplet);
+  `deploy.sh --requests` installs the service as the deploy user's systemd user unit
+  `3cb-requests`.
+
 ### CLI
 
 `tournament` takes deck files or directories of `.txt` decks. It prints each result as it's

@@ -5,3 +5,6 @@ results*.json
 /entries/
 /history/
 /cache/
+/site/public/
+/site/.env
+/requests/
