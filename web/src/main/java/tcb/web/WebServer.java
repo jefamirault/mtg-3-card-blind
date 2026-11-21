@@ -64,10 +64,13 @@ public final class WebServer {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
     private static final int MAX_NAME = EntryImport.MAX_NAME;
     private static final int MAX_NOTES = 2000;
-    private static final Solver.Options DEFAULTS = Solver.Options.defaults();
+    private static final Solver.Options DEFAULTS = searchOptions(Solver.Options.defaults().maxTurns(),
+            Solver.Options.defaults().nodeBudget(), Solver.Options.defaults().timeBudget(), Solver.Options.defaults().exactTurns());
     private static final int MAX_TIME_SECONDS = 24 * 60 * 60;
     private static final long MIN_NODES = 1_000, MAX_NODES = 1_000_000_000;
     private static final int MAX_TURNS = 100; // turn cycles
+    /** Turn limit (cycles) of the short first search; costs ~15% more nodes on examples/decks. */
+    private static final int FIRST_TURNS = 2;
     /** Most entries a tournament that saves search trees can have (8 entries: 56 games). */
     private static final int MAX_TREE_ENTRIES = 8;
     private static final DateTimeFormatter ID_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
@@ -500,8 +503,16 @@ public final class WebServer {
         if (turns < 1 || turns > MAX_TURNS) {
             problems.add("Turn limit must be between 1 and " + MAX_TURNS + ".");
         }
-        int limit = Turns.forgeTurns(turns);
-        return new Solver.Options(limit, limit, nodes, Duration.ofSeconds(time), exactTurns);
+        return searchOptions(Turns.forgeTurns(turns), nodes, Duration.ofSeconds(time), exactTurns);
+    }
+
+    /**
+     * A short search first, so a game that runs out of budget at the full limit still has a result
+     * and a line (proven to the short limit); then straight to the full limit (#42).
+     */
+    private static Solver.Options searchOptions(int limit, long nodes, Duration time, boolean exactTurns) {
+        int first = Math.min(limit, Turns.forgeTurns(FIRST_TURNS));
+        return new Solver.Options(limit, first, nodes, time, exactTurns, false, true);
     }
 
     /** Live statistics of the games being solved, longest-running first. */

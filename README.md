@@ -83,7 +83,9 @@ and the card view's *Entries with this card* searches for that card. Tick the en
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
 `--history` folder (default `history`); the page lists them, newest first, and lets you view or
 delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
-limit and exact turns; they default to the CLI's defaults. *Stop* ends a running tournament early:
+limit and exact turns; they default to the CLI's defaults. The web UI first searches each game to
+turn 2, then at the full limit, so a game that runs out of budget still has a result (proven to
+turn 2) and a line to watch; that first search costs about 15% more nodes. *Stop* ends a running tournament early:
 finished games are kept and saved, and the rest are listed as not played. Click a card in an
 entry's hand or in the standings to see its Scryfall scan, rules text and format legality (fetched
 from the Scryfall API in the browser; click a double-faced card's scan to turn it over).

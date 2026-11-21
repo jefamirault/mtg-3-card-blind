@@ -90,7 +90,8 @@ public final class ResultCache {
                 JsonObject budget = o.getAsJsonObject("budget");
                 if (budget.get("nodes").getAsLong() < options.nodeBudget()
                         || budget.get("seconds").getAsDouble() < options.timeBudget().toMillis() / 1000.0
-                        || budget.get("firstTurnLimit").getAsInt() != options.firstTurnLimit()) {
+                        || budget.get("firstTurnLimit").getAsInt() != options.firstTurnLimit()
+                        || (budget.has("jumpToLimit") && budget.get("jumpToLimit").getAsBoolean()) != options.jumpToLimit()) {
                     return null;
                 }
             }
@@ -113,7 +114,7 @@ public final class ResultCache {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("key", key(a, b, startingPlayer, options));
         root.put("budget", Map.of("nodes", options.nodeBudget(), "seconds", options.timeBudget().toMillis() / 1000.0,
-                "firstTurnLimit", options.firstTurnLimit()));
+                "firstTurnLimit", options.firstTurnLimit(), "jumpToLimit", options.jumpToLimit()));
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("pWin", result.pWin());
         r.put("pDraw", result.pDraw());

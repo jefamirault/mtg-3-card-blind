@@ -35,6 +35,9 @@ public final class Solver {
      *                       maxTurns, and a win found there is the result.
      * @param firstTurnLimit start of iterative deepening (doubling up to maxTurns); equal to
      *                       maxTurns means a single search
+     * @param jumpToLimit    after the firstTurnLimit search, go straight to maxTurns instead of
+     *                       doubling: one cheap search makes sure there's a result if the budget
+     *                       runs out, without paying for every limit in between
      * @param exactTurns     key the transposition table on (position, turn) instead of position
      *                       alone. Turn-free keys merge "do it now" with "do it a turn later",
      *                       which is much faster, but can misjudge games decided near the limit.
@@ -43,9 +46,14 @@ public final class Solver {
      *                       for checking that those reductions don't change results.
      */
     public record Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
-                          boolean exhaustive) {
+                          boolean exhaustive, boolean jumpToLimit) {
+        public Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
+                       boolean exhaustive) {
+            this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, false);
+        }
+
         public Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns) {
-            this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, false);
+            this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, false, false);
         }
 
         public static Options defaults() {
@@ -53,7 +61,7 @@ public final class Solver {
         }
 
         public Options withExhaustive(boolean exhaustive) {
-            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive);
+            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, jumpToLimit);
         }
     }
 
@@ -591,8 +599,14 @@ public final class Solver {
         return outcome.result() == GameRunner.Result.DRAW && outcome.turn() > limit;
     }
 
-    /** The turn limit to search after {@code limit}: doubling, stopping at maxTurns and at the cap on the way. */
+    /**
+     * The turn limit to search after {@code limit}: doubling, stopping at maxTurns and at the cap on
+     * the way (or, with jumpToLimit, maxTurns right after the first search).
+     */
     private int nextLimit(int limit, int cap) {
+        if (options.jumpToLimit() && limit < options.maxTurns()) {
+            return options.maxTurns();
+        }
         return Math.min(limit * 2, limit < options.maxTurns() ? options.maxTurns() : cap);
     }
 

@@ -43,6 +43,23 @@ class SolverTest {
     }
 
     @Test
+    void jumpToLimitKeepsTheShortSearchWhenTheBudgetRunsOut() {
+        // Goblin Guide vs Kird Ape takes ~5,600 nodes at a 25-turn limit: with 1,000 the full search
+        // runs out, but the 2-turn search before it doesn't, so there's a result and a line (#42).
+        DeckList ape = DeckList.of("ape", "Forest", "Mountain", "Kird Ape");
+        Options jump = new Options(50, 4, 1_000, Duration.ofMinutes(5), false, false, true);
+        GameResult r = new Solver(GUIDE, ape, 0, jump).solve();
+        assertEquals(4, r.provenTurnLimit(), r.describe());
+        assertTrue(!r.complete());
+        assertTrue(r.principalVariation().stream().anyMatch(l -> l.startsWith("A priority: Play Mountain")),
+                r.principalVariation().toString());
+        // searching straight at the full limit with the same budget has nothing to show
+        GameResult direct = new Solver(GUIDE, ape, 0, new Options(50, 50, 1_000, Duration.ofMinutes(5), false)).solve();
+        assertEquals(0, direct.provenTurnLimit());
+        assertEquals(List.of("(search budget exhausted before any result)"), direct.principalVariation());
+    }
+
+    @Test
     void emptyLibraryDoesNotLose() {
         // No lands, so nobody can ever act; both players draw from an empty library every turn.
         DeckList bears = DeckList.of("bears", "Grizzly Bears", "Grizzly Bears", "Grizzly Bears");
