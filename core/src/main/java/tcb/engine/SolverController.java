@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.Range;
+
 import forge.ai.AiCache;
 import forge.ai.ComputerUtil;
 import forge.ai.ComputerUtilAbility;
@@ -191,7 +193,7 @@ public class SolverController extends PlayerControllerAi {
                 }
                 TargetEnumerator.clear(TargetEnumerator.targetingParts(sa));
             }
-            if (sa.costHasManaX()) {
+            if (sa.costHasManaX() || announcesX(sa)) {
                 sa.setXManaCostPaid(null);
             }
         }
@@ -224,7 +226,16 @@ public class SolverController extends PlayerControllerAi {
     private List<Integer> xValues(SpellAbility sa) {
         List<Integer> values = new ArrayList<>();
         if (!sa.costHasManaX()) {
-            values.add(null);
+            if (announcesX(sa)) {
+                // X chosen on casting but not paid in mana, e.g. Sickening Shoal's "exile a black card
+                // with mana value X": the payability check drops the values nothing can pay for
+                Range<Integer> bounds = AbilityUtils.getAnnouncementBounds(sa, "X");
+                for (int x = bounds.getMinimum(); x <= Math.min(MAX_X, bounds.getMaximum()); x++) {
+                    values.add(x);
+                }
+            } else {
+                values.add(null);
+            }
             return values;
         }
         int min = sa.getPayCosts().getCostMana() == null ? 0 : sa.getPayCosts().getCostMana().getXMin();
@@ -233,6 +244,24 @@ public class SolverController extends PlayerControllerAi {
             values.add(x);
         }
         return values;
+    }
+
+    /**
+     * Whether the player announces X when casting this (an {@code Announce$ X} script). Forge's AI
+     * casting path skips the announcement, so X has to be set here or it stays unset and the
+     * cost can't be paid.
+     */
+    private static boolean announcesX(SpellAbility sa) {
+        String announce = sa.getParam("Announce");
+        if (announce == null) {
+            return false;
+        }
+        for (String v : announce.split(",")) {
+            if (v.trim().equalsIgnoreCase("X")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -278,7 +307,7 @@ public class SolverController extends PlayerControllerAi {
             if (!sa.isLegalAfterStack() || !sa.canPlay()) {
                 continue;
             }
-            if (TargetEnumerator.targetingParts(sa).isEmpty() && !sa.costHasManaX() && !ComputerUtilCost.canPayCost(sa, player, false)) {
+            if (TargetEnumerator.targetingParts(sa).isEmpty() && !sa.costHasManaX() && !announcesX(sa) && !ComputerUtilCost.canPayCost(sa, player, false)) {
                 continue;
             }
             result.add(sa);

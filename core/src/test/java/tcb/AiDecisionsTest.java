@@ -124,6 +124,27 @@ class AiDecisionsTest {
         assertTrue(b.turn() <= 19, "8 counters by A's 9th turn, cast on A's 10th: turn " + b.turn());
     }
 
+    @Test
+    void announcedXIsChosen() {
+        // Sickening Shoal's alternative cost exiles a black card with mana value X, announced on
+        // casting. Forge's AI casting path never announced it, so the cost couldn't be paid and the
+        // AI retried it until Forge gave up ("AI looped too much").
+        DeckList shoal = DeckList.of("shoal", "Khan, Vengeful Heart", "Sickening Shoal", "Swamp");
+        // B plays Plains and casts the Lions; A passes until Shoal can target them
+        Branch b = walkTo(shoal, LIONS, "priority",
+                br -> br.player() == 1 ? 0 : br.labels().size() - 1,
+                l -> l.contains("Sickening Shoal") && l.contains("-> Savannah Lions"));
+        List<String> shoals = b.labels().stream().filter(l -> l.contains("Sickening Shoal")).toList();
+        // Khan's mana value is 4: X=4 is the only value the exile can pay for
+        assertEquals(1, shoals.size(), shoals.toString());
+        assertTrue(shoals.get(0).startsWith("Cast Sickening Shoal with X=4 -> Savannah Lions"), shoals.toString());
+        // and the cast goes through: the Lions die, so they can't win
+        GameResult r = new Solver(shoal, LIONS, 0, OPTS).solve();
+        assertTrue(r.value() >= 0, "Shoal holds off the Lions: " + r.principalVariation());
+        assertTrue(r.principalVariation().stream().anyMatch(l -> l.contains("Cast Sickening Shoal with X=4")),
+                r.principalVariation().toString());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static int first(Branch b) {
