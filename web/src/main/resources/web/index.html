@@ -358,6 +358,8 @@
     padding: 2rem; cursor: zoom-out; background: rgba(23, 32, 43, .88);
   }
   #lightbox[hidden] { display: none; }
+  /* the page under a modal (card preview, replay board) stays put */
+  body:has(#lightbox:not([hidden]), #board:not([hidden])) { overflow: hidden; }
   .lbwrap { display: flex; gap: 1.2rem; align-items: flex-start; justify-content: center; max-height: 100%; max-width: 100%; }
   .lbscan {
     /* sized up front (card ratio 5:7) so the panel doesn't jump while the scan loads */
@@ -1795,7 +1797,6 @@ async function openReplay(id, k, g, button) {
   bdReturn = button;
   board.querySelector("#board-title").textContent = `${g.a} vs ${g.b}, ${g.onThePlay} on the play`;
   board.hidden = false;
-  document.body.style.overflow = "hidden";
   board.focus();
   bdScrub.max = String(bd.frames.length - 1);
   bdShow(0, false);
@@ -1958,7 +1959,6 @@ function closeReplay() {
   peek.hidden = true;
   bdPause();
   board.hidden = true;
-  document.body.style.overflow = "";
   bd = null;
   bdReturn?.focus();
 }
