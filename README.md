@@ -119,9 +119,12 @@ site/requests.sh solved ID "In the Nov 22 tournament"   # or: declined ID [reply
   without their notes. `site/requests.sh` collects them with the key in `site/.env`: it saves all
   of them in `requests/requests.json` and the waiting decks in `requests/waiting.txt`, one line
   per deck in the import format, ready to paste into *Import or export entries*.
-- **Server**: `site/nginx.conf` is the site config (`3cb.jefamirault.com` on the shared droplet);
-  `deploy.sh --requests` installs the service as the deploy user's systemd user unit
-  `3cb-requests`.
+- **Server**: the site is https://mtg.jefamirault.com/3cb/ (the MTG apps each have a path on
+  `mtg.jefamirault.com`). `site/nginx-mtg-3cb.conf` is an nginx snippet that the
+  `mtg.jefamirault.com` server block includes; it serves `/var/www/3cb` at `/3cb/` and proxies
+  `/3cb/api/requests` to the request service, which `deploy.sh --requests` installs as the deploy
+  user's systemd user unit `3cb-requests`. The page uses relative paths only, so it works under any
+  path.
 
 ### CLI
 

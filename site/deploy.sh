@@ -32,7 +32,7 @@ set -a; source "$site/.env"; set +a
 : "${DEPLOY_USER:?DEPLOY_USER not set in site/.env}"
 : "${DEPLOY_HOST:?DEPLOY_HOST not set in site/.env}"
 : "${DEPLOY_PATH:?DEPLOY_PATH not set in site/.env}"
-: "${DEPLOY_DOMAIN:?DEPLOY_DOMAIN not set in site/.env}"
+: "${SITE_URL:?SITE_URL not set in site/.env}"
 target="$DEPLOY_USER@$DEPLOY_HOST"
 
 if [[ -n "$EXPORT" ]]; then
@@ -103,6 +103,6 @@ REMOTE
   fi
 fi
 
-echo "Site → $target:$DEPLOY_PATH/ ($DEPLOY_DOMAIN)"
+echo "Site → $target:$DEPLOY_PATH/ ($SITE_URL/)"
 rsync "${RSYNC_OPTS[@]}" "$site/public/" "$target:$DEPLOY_PATH/" | grep -v -E '^\.[fd] |/$' || true
-echo "Done. → https://$DEPLOY_DOMAIN/"
+echo "Done. → $SITE_URL/"

@@ -47,6 +47,8 @@ it safely.
   `site/requests/server.js` with `PORT`, `TOKEN`, `DATA_DIR`, `CARDS_FILE`, and serve the folder
   with a small proxy passing `/api/requests` to it. `site/requests.sh` takes `TCB_SITE_ENV` (a
   settings file with `REQUESTS_URL`) to talk to that instead.
+- The site is served at https://mtg.jefamirault.com/3cb/ (each MTG app gets a path there), so the
+  public page must use relative URLs only: `data/…`, `api/requests`, never `/…`.
 - Deploys (`site/deploy.sh`) and server setup are the user's to run. `site/.env` holds the request
   key; it's git-ignored, as are `site/public/` and `requests/`.
 

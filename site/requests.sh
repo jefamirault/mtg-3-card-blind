@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
 # Collect requests from the public site, and mark them done. Settings come from site/.env
-# (DEPLOY_DOMAIN and REQUESTS_TOKEN).
+# (SITE_URL and REQUESTS_TOKEN).
 #
 #   site/requests.sh                       # pull: list the waiting requests, and save them
 #   site/requests.sh solved ID [REPLY]     # mark a request solved (REPLY is shown on the site)
 #   site/requests.sh declined ID [REPLY]   # or declined
 #   site/requests.sh waiting ID            # back to waiting
 #
-# REQUESTS_URL in the settings overrides https://$DEPLOY_DOMAIN/api/requests.
+# REQUESTS_URL in the settings overrides $SITE_URL/api/requests.
 #
 # pull saves every request in requests/requests.json, and the waiting decks in
 # requests/waiting.txt, one per line in the import format: paste it into "Import or export
@@ -19,9 +19,9 @@ root="$(dirname "$site")"
 env="${TCB_SITE_ENV:-$site/.env}"  # another settings file, e.g. for a test server
 [[ -f "$env" ]] || { echo "Missing $env: copy site/env.example and fill it in." >&2; exit 1; }
 set -a; source "$env"; set +a
-: "${DEPLOY_DOMAIN:?DEPLOY_DOMAIN not set in site/.env}"
+: "${SITE_URL:?SITE_URL not set in site/.env}"
 : "${REQUESTS_TOKEN:?REQUESTS_TOKEN not set in site/.env}"
-api="${REQUESTS_URL:-https://$DEPLOY_DOMAIN/api/requests}"
+api="${REQUESTS_URL:-$SITE_URL/api/requests}"
 auth=(-H "Authorization: Bearer $REQUESTS_TOKEN")
 
 case "${1:-pull}" in
