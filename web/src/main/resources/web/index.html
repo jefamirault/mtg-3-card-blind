@@ -84,7 +84,13 @@
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
   /* a wide matchup table scrolls in its own box instead of widening the page */
   main > section { min-width: 0; }
-  @media (max-width: 860px) { main > .requests { order: 1; } } /* the public site: results first on a phone */
+  /* on a wide screen the side column (entries, or the request form) scrolls on its own, so the
+     results stay where they are */
+  @media (min-width: 861px) {
+    main { align-items: start; }
+    main > .side { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding: 1rem .6rem 1rem 0; margin-top: -1rem; overscroll-behavior: contain; }
+  }
+  @media (max-width: 860px) { main > .side { order: 1; } } /* on a phone, results first (entries, or the request form, below) */
   h2 { font-size: 1.35rem; margin: 0 0 .9rem; font-weight: 600; }
   h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; font-weight: 600; }
 
@@ -118,6 +124,11 @@
   .entry-notes { font-size: .85rem; white-space: pre-line; overflow-wrap: anywhere; margin-top: .15rem; }
   .entry-dates { font-size: .78rem; color: var(--ink-soft); margin-top: .15rem; }
   .entry-actions { display: flex; flex-direction: column; align-items: flex-end; }
+  /* no room beside the cards: Edit and Remove go under them */
+  @media (max-width: 520px) {
+    .entry { grid-template-columns: auto auto 1fr; }
+    .entry-actions { grid-column: 2 / -1; flex-direction: row; gap: .6rem; align-items: center; }
+  }
   .entry.editing { background: var(--stock); box-shadow: inset 3px 0 0 var(--action); }
   textarea {
     width: 100%; min-height: 3.6rem; padding: .45rem .6rem; background: var(--stock); resize: vertical;
@@ -212,12 +223,18 @@
   .pts { font-weight: 700; font-size: 1.25rem; text-align: right; }
   .record { display: block; font-size: .8rem; font-weight: 400; color: var(--ink-soft); }
 
-  .matrix-wrap { overflow-x: auto; }
-  table.matrix { border-collapse: collapse; font-size: .9rem; }
+  /* scrolls both ways in its own box; deck names and column numbers stay in view */
+  .matrix-wrap { overflow: auto; max-height: 78vh; }
+  table.matrix { border-collapse: separate; border-spacing: 0; font-size: .9rem; }
   .matrix th, .matrix td { padding: .35rem .5rem; text-align: center; }
-  .matrix th { font-weight: 500; color: var(--ink-soft); }
-  .matrix th[scope=row] { text-align: right; color: var(--ink); white-space: nowrap; }
+  .matrix th { font-weight: 500; color: var(--ink-soft); background: var(--paper); }
+  .matrix thead th { position: sticky; top: 0; z-index: 1; }
+  .matrix th[scope=row] { position: sticky; left: 0; text-align: right; color: var(--ink); white-space: nowrap; }
+  .matrix thead th:first-child { left: 0; z-index: 2; }
   .matrix td { min-width: 2.6rem; color: #fff; font-weight: 600; border: 2px solid var(--paper); }
+  .matrix td.pair { cursor: pointer; }
+  .matrix td.pair:hover, .matrix td.pair:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .matrix tr:hover th[scope=row] { color: var(--action); }
   .matrix td.self { background: none; color: var(--rule); }
   .matrix td.unplayed { background: none; color: var(--ink-soft); border: 2px dashed var(--rule); font-weight: 400; }
   .caption { font-size: .85rem; color: var(--ink-soft); margin: .5rem 0 0; max-width: 60ch; }
@@ -246,6 +263,12 @@
   .bd-top h2 { margin: 0; font-size: 1.05rem; }
   .bd-status { margin: 0; color: #B9C3D1; font-size: .9rem; }
   .bd-close { margin-left: auto; border: 0; background: none; color: #E9EDF3; font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 .3rem; }
+  /* previous / next game of the list it was opened from */
+  .bd-games { display: flex; align-items: center; gap: .4rem; font-size: .85rem; color: #B9C3D1; }
+  .bd-games[hidden] { display: none; }
+  .bd-games button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); color: #E9EDF3; border-radius: 3px; padding: .15rem .5rem; cursor: pointer; font: inherit; }
+  .bd-games button:hover { background: rgba(255, 255, 255, .15); }
+  .bd-games button:disabled { opacity: .35; cursor: default; }
   .bd-table { display: grid; grid-template-rows: auto 1fr auto; gap: .3rem; padding: .4rem 1rem; min-height: 0; overflow: auto; }
   .bd-side { display: grid; grid-template-columns: 1fr auto; gap: .3rem 1.2rem; align-items: center; }
   .bd-rows { display: grid; gap: .4rem; min-width: 0; }
@@ -335,18 +358,56 @@
   .tree-best { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--action); color: var(--action); border-radius: 3px; padding: 0 .3rem; }
   .tree-leaf { margin: 0; padding: .5rem .7rem; background: var(--stock); border: 1px solid var(--rule); border-radius: 3px; }
 
-  /* --- saved tournaments --- */
-  .history { list-style: none; margin: 0 0 1.5rem; padding: 0; max-height: 13rem; overflow: auto; border-top: 1px solid var(--rule); }
-  .history li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .6rem; border-bottom: 1px solid var(--rule); }
-  .history .view {
-    border: 0; background: none; cursor: pointer; text-align: left; padding: .45rem .5rem;
-    display: flex; flex-wrap: wrap; gap: .1rem .8rem; align-items: baseline;
+  /* --- saved tournaments: one picked from a list, shown in tabs --- */
+  .history { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin: 0 0 1rem; }
+  .history[hidden] { display: none; }
+  .history label { font-size: .85rem; }
+  .history select {
+    flex: 1 1 20rem; min-width: 0; max-width: 100%; padding: .4rem .5rem; font: inherit; font-size: .92rem;
+    background: var(--stock); border: 1px solid var(--rule); border-radius: 3px;
   }
-  .history .view:hover { background: var(--stock); }
-  .history li[aria-current=true] { background: var(--stock); box-shadow: inset 3px 0 0 var(--action); }
-  .history .when { font-weight: 600; }
-  .history .summary { font-size: .88rem; color: var(--ink-soft); }
+  .history .step { border: 1px solid var(--rule); background: var(--stock); border-radius: 3px; padding: .3rem .55rem; cursor: pointer; font: inherit; }
+  .history .step:disabled { color: var(--rule); cursor: default; }
+  @media (max-width: 520px) { .history select { order: 1; flex-basis: 100%; } .history .step, .history .remove { order: 2; } }
   .shown-head { font-size: .9rem; color: var(--ink-soft); margin: 0 0 .9rem; }
+  .tabs { display: flex; gap: 1.4rem; border-bottom: 1px solid var(--rule); margin: 0 0 1.1rem; }
+  .tabs button {
+    border: 0; background: none; padding: .45rem 0 .4rem; font: inherit; font-weight: 600; color: var(--ink-soft);
+    border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer;
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--action); }
+  .tabs .n { font-weight: 400; color: var(--ink-soft); }
+  .standing-name.linkish { color: var(--ink); text-decoration: none; font: inherit; font-weight: 600; }
+  .standing-name.linkish:hover, .standing-name.linkish:focus-visible { color: var(--action); text-decoration: underline; }
+  .standings li:first-child .standing-name.linkish { font-size: 1.3rem; }
+
+  /* --- the games of a tournament: filters, then one row each --- */
+  .game-filters { display: flex; flex-wrap: wrap; gap: .5rem .7rem; align-items: end; margin: 0 0 .7rem; }
+  .game-filters label { display: grid; gap: .15rem; font-size: .8rem; }
+  .game-filters select, .game-filters input {
+    padding: .35rem .45rem; font: inherit; font-size: .92rem; width: 12rem; max-width: 100%;
+    background: var(--stock); border: 1px solid var(--rule); border-radius: 3px;
+  }
+  .game-filters .clear { border: 0; background: none; padding: .35rem 0; color: var(--action); cursor: pointer; text-decoration: underline; font: inherit; font-size: .9rem; }
+  .games-count { font-size: .88rem; color: var(--ink-soft); margin: 0 0 .4rem; }
+  .games { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .games summary { display: grid; grid-template-columns: 1fr auto; gap: .2rem .8rem; align-items: center; list-style: none; padding: .45rem 0; }
+  .games summary::-webkit-details-marker { display: none; }
+  .games .g-what { display: flex; flex-wrap: wrap; gap: .1rem .6rem; align-items: baseline; }
+  .games .g-what::before { content: "▸"; color: var(--ink-soft); font-size: .8rem; }
+  .games details[open] .g-what::before { content: "▾"; }
+  .games .g-play { font-size: .85rem; color: var(--ink-soft); }
+  .games .g-body { padding: 0 0 .3rem 1rem; }
+  .watch-row {
+    border: 1px solid var(--action); background: var(--stock); color: var(--action); border-radius: 3px;
+    padding: .2rem .6rem; cursor: pointer; font: inherit; font-size: .88rem; font-weight: 600; white-space: nowrap;
+  }
+  .watch-row:hover, .watch-row:focus-visible { background: var(--action); color: #fff; }
+  .watch-row:disabled { border-color: var(--rule); color: var(--ink-soft); background: none; cursor: default; }
+  .no-watch { font-size: .8rem; color: var(--ink-soft); white-space: nowrap; }
+  .more-games { margin: .8rem 0 0; }
+  .more-games button { border: 1px solid var(--rule); background: var(--stock); border-radius: 3px; padding: .35rem .8rem; cursor: pointer; font: inherit; }
 
   .cardlink { border: 0; background: none; padding: 0; color: inherit; cursor: zoom-in; text-decoration: underline dotted var(--rule); text-underline-offset: .2em; }
   .cardlink:hover, .cardlink:focus-visible { color: var(--action); text-decoration-color: currentColor; }
@@ -523,7 +584,7 @@
 </nav>
 
 <main>
-  <section class="public-only requests" aria-labelledby="requests-h">
+  <section class="public-only requests side" aria-labelledby="requests-h">
     <h2 id="requests-h">Request a deck or matchup</h2>
     <form id="request" autocomplete="off" novalidate>
       <fieldset>
@@ -565,7 +626,7 @@
     <ul class="queue" id="queue"><li class="empty">Loading…</li></ul>
   </section>
 
-  <section class="local-only" aria-labelledby="entries-h">
+  <section class="local-only side" aria-labelledby="entries-h">
     <h2 id="entries-h">Entries</h2>
     <form id="add" autocomplete="off">
       <p class="editing-note" id="editing-note" hidden></p>
@@ -634,7 +695,13 @@
     <h2 id="results-h">Results</h2>
     <ul class="problems" id="run-problems" aria-live="polite"></ul>
     <div id="live"></div>
-    <ul class="history" id="history" aria-label="Past tournaments" hidden></ul>
+    <div class="history" id="history" hidden>
+      <label for="history-pick">Tournament</label>
+      <button type="button" class="step" id="history-newer" aria-label="Newer tournament" title="Newer tournament">‹</button>
+      <select id="history-pick"></select>
+      <button type="button" class="step" id="history-older" aria-label="Older tournament" title="Older tournament">›</button>
+      <button type="button" class="remove local-only" id="history-delete">Delete</button>
+    </div>
     <div id="results"></div>
   </section>
 </main>
@@ -648,6 +715,11 @@
   <div class="bd-top">
     <h2 id="board-title"></h2>
     <p class="bd-status"></p>
+    <div class="bd-games" hidden>
+      <button type="button" class="bd-prev-game" title="Previous game (P)">‹ Previous game</button>
+      <span class="bd-game-pos"></span>
+      <button type="button" class="bd-next-game" title="Next game (N)">Next game ›</button>
+    </div>
     <button class="bd-close" type="button" aria-label="Close the replay" title="Close (Esc)">×</button>
   </div>
   <div class="bd-table"></div>
@@ -1580,7 +1652,7 @@ const describeOptions = (o) => `${duration(o.timeSeconds)} and ${Number(o.nodes)
 $("#run").addEventListener("click", async () => {
   const { ok, data } = await api("POST", "/api/tournament", { entries: chosen(), options: settings() });
   showProblems($("#run-problems"), ok ? [] : data.problems || [data.error]);
-  if (ok) { viewing = null; poll(); }
+  if (ok) { viewing = null; view.game = null; writeRoute(); poll(); }
 });
 
 $("#stop").addEventListener("click", async () => {
@@ -1602,64 +1674,150 @@ async function poll() {
   loadSettings(data.defaults);
   if (busy(tournamentState) && !busy(data.state)) {
     viewing = null; // show the tournament that just finished
+    view.game = null;
+    writeRoute();
     await loadHistory();
   }
   render(data);
   if (busy(data.state)) pollTimer = setTimeout(poll, 2000);
 }
 
+// ---- where you are: the tournament, its tab, the games filter and the game being watched, kept
+// in the URL's hash (#t=…&tab=games&deck=…&game=7), so a link opens the same view and Back closes
+// a replay. #stats is the stats page. (The entry search keeps its own ?q=.)
+const TABS = ["standings", "matchups", "games"];
+const view = { tab: "standings", deck: "", vs: "", result: "", text: "", game: null };
+let gamePushed = false; // the open replay added a history entry (so closing it goes back)
+
+function readRoute() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const k = p.get("game");
+  return {
+    stats: location.hash === "#stats",
+    t: p.get("t"),
+    tab: TABS.includes(p.get("tab")) ? p.get("tab") : k != null ? "games" : "standings",
+    deck: p.get("deck") || "", vs: p.get("vs") || "", result: p.get("result") || "", text: p.get("q") || "",
+    game: k != null && /^\d+$/.test(k) ? Number(k) : null,
+  };
+}
+function routeHash() {
+  const p = new URLSearchParams();
+  if (viewing) p.set("t", viewing);
+  if (view.tab !== "standings") p.set("tab", view.tab);
+  if (view.tab === "games" || view.game != null) {
+    if (view.deck) p.set("deck", view.deck);
+    if (view.vs) p.set("vs", view.vs);
+    if (view.result) p.set("result", view.result);
+    if (view.text) p.set("q", view.text);
+  }
+  if (view.game != null) p.set("game", String(view.game));
+  const h = p.toString();
+  return h ? "#" + h : "";
+}
+// push: a new history entry (opening a game); otherwise the current one changes
+function writeRoute(push = false) {
+  const url = new URL(location.href);
+  url.hash = routeHash();
+  if (url.href === location.href) return;
+  if (push) window.history.pushState(null, "", url); else window.history.replaceState(null, "", url);
+}
+function applyRoute() {
+  const r = readRoute();
+  showView(r.stats);
+  if (r.stats) return;
+  viewing = r.t;
+  Object.assign(view, { tab: r.tab, deck: r.deck, vs: r.vs, result: r.result, text: r.text, game: r.game });
+  if (view.game == null) { gamePushed = false; closeReplay(false); }
+  renderHistory();
+  showSaved();
+}
+window.addEventListener("popstate", applyRoute);
+window.addEventListener("hashchange", applyRoute); // the Tournament / Stats links, a pasted link
+
 // ---- saved tournaments
 let history = [];
 let viewing = null; // id of the saved tournament picked from the list; null shows the newest
 const saved = new Map();
 const when = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+const shownId = () => busy(tournamentState) && !viewing ? null : viewing || history[0]?.id;
 
 async function loadHistory() {
   const { data } = await api("GET", "/api/history");
   history = Array.isArray(data) ? data : [];
-  if (viewing && !history.some((h) => h.id === viewing)) viewing = null;
+  if (viewing && !history.some((h) => h.id === viewing)) { viewing = null; writeRoute(); }
   renderHistory();
 }
 
 function renderHistory() {
-  const list = $("#history");
-  list.hidden = history.length === 0;
-  const shown = busy(tournamentState) && !viewing ? null : viewing || history[0]?.id;
-  list.replaceChildren(...history.map((h) => {
-    const view = el("button", { class: "view", type: "button" },
-      el("span", { class: "when" }, when(h.finished)),
-      el("span", { class: "summary" },
-        `${h.entries.length} entries, ${h.games} games in ${duration(h.seconds)}`
-        + (h.notPlayed ? ` (stopped, ${h.notPlayed} not played)` : "")
-        + (h.standings?.length ? ` · ${ranked(h.standings)[0].name} first with ${score(ranked(h.standings)[0])}` : "")));
-    view.addEventListener("click", () => { viewing = h.id; renderHistory(); showSaved(); });
-    const del = el("button", { class: "remove", type: "button", "aria-label": "Delete results from " + when(h.finished) }, "Delete");
-    del.addEventListener("click", async () => {
-      if (!confirm(`Delete the results from ${when(h.finished)}? This can't be undone.`)) return;
-      await api("DELETE", "/api/history/" + encodeURIComponent(h.id));
-      saved.delete(h.id);
-      await loadHistory();
-      showSaved();
-    });
-    return el("li", { "aria-current": String(h.id === shown) }, view, PUBLIC ? null : del);
-  }));
+  $("#history").hidden = history.length === 0;
+  const pick = $("#history-pick");
+  const shown = shownId();
+  const options = [...(shown ? [] : [["", "The tournament running now"]]), ...history.map((h) => {
+    const top = h.standings?.length ? ranked(h.standings)[0] : null;
+    return [h.id, `${when(h.finished)} · ${h.entries.length} entries, ${h.games} games`
+      + (h.notPlayed ? ` (stopped, ${h.notPlayed} not played)` : "")
+      + (top ? ` · ${top.name} first` : "")];
+  })];
+  // rebuilt only when it changes: every poll calls this, and rebuilding closes an open list
+  const sig = JSON.stringify(options);
+  if (pick.dataset.sig !== sig) {
+    pick.dataset.sig = sig;
+    pick.replaceChildren(...options.map(([v, t]) => el("option", { value: v }, t)));
+  }
+  pick.value = shown || "";
+  const at = history.findIndex((h) => h.id === shown);
+  $("#history-newer").disabled = at <= 0;
+  $("#history-older").disabled = at < 0 || at >= history.length - 1;
+  $("#history-delete").disabled = !shown;
 }
+function pickTournament(id) {
+  if (id === shownId()) return;
+  viewing = id;
+  // a deck filter only means something in a tournament that deck played in
+  const t = history.find((h) => h.id === id);
+  if (t && view.deck && !t.entries.includes(view.deck)) view.deck = view.vs = "";
+  if (t && view.vs && !t.entries.includes(view.vs)) view.vs = "";
+  writeRoute();
+  renderHistory();
+  showSaved();
+}
+$("#history-pick").addEventListener("change", (e) => pickTournament(e.target.value || null));
+const stepTournament = (d) => { const at = history.findIndex((h) => h.id === shownId()); if (history[at + d]) pickTournament(history[at + d].id); };
+$("#history-newer").addEventListener("click", () => stepTournament(-1));
+$("#history-older").addEventListener("click", () => stepTournament(1));
+$("#history-delete").addEventListener("click", async () => {
+  const id = shownId(), h = history.find((x) => x.id === id);
+  if (!h || !confirm(`Delete the results from ${when(h.finished)}? This can't be undone.`)) return;
+  await api("DELETE", "/api/history/" + encodeURIComponent(id));
+  saved.delete(id);
+  if (viewing === id) viewing = null;
+  writeRoute();
+  await loadHistory();
+  showSaved();
+});
 
+// What's on screen, so a poll (every 2 s while a tournament runs) doesn't rebuild the same results
+// and close the games you had open.
+let shownKey = null;
 async function showSaved() {
   const out = $("#results");
-  const id = busy(tournamentState) && !viewing ? null : viewing || history[0]?.id;
+  const id = shownId();
   if (!id) {
+    shownKey = null;
     out.replaceChildren(busy(tournamentState) ? "" : el("p", { class: "empty" },
       "Add at least two entries, tick the ones to play, then run the tournament. Each pair of decks plays two games, one with each on the play."));
     return;
   }
   if (!saved.has(id)) {
     const { ok, data } = await api("GET", "/api/history/" + encodeURIComponent(id));
-    if (!ok) { out.replaceChildren(el("p", { class: "problems" }, data.error)); return; }
+    if (!ok) { shownKey = null; out.replaceChildren(el("p", { class: "problems" }, data.error)); return; }
     saved.set(id, data);
   }
   const t = saved.get(id);
-  if (id !== (viewing || history[0]?.id)) return; // another tournament was picked meanwhile
+  if (id !== shownId()) return; // another tournament was picked meanwhile
+  const key = [id, $("#opt-scoring").value].join("|");
+  if (key === shownKey && out.firstChild) { showTab(); openRoutedGame(); return; }
+  shownKey = key;
   const unplayed = t.results.notPlayed || [];
   const head = unplayed.length
     ? `Tournament stopped ${when(t.finished)} after ${duration(t.seconds)}: ${t.results.games.length} of ${t.results.games.length + unplayed.length} games played.`
@@ -1667,6 +1825,27 @@ async function showSaved() {
   out.replaceChildren(
     el("p", { class: "shown-head" }, head, t.options ? el("br") : null, t.options ? `Search: ${describeOptions(t.options)}.` : null),
     ...renderResults(t.results, t.trees ? id : null, id));
+  showTab();
+  openRoutedGame();
+}
+
+// Shows the tab view.tab of the results on screen.
+function showTab() {
+  for (const b of document.querySelectorAll("#results .tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === view.tab));
+  for (const p of document.querySelectorAll("#results .tab-panel")) p.hidden = p.dataset.tab !== view.tab;
+  gamesFilter?.sync();
+}
+function setTab(tab) {
+  view.tab = tab;
+  writeRoute();
+  showTab();
+}
+// Shows the games of one deck, or one pair (from the standings or the matchup table).
+function showGames(deck, vs = "") {
+  Object.assign(view, { tab: "games", deck, vs, result: "", text: "" });
+  writeRoute();
+  showTab();
+  $("#results .tabs")?.scrollIntoView({ block: "nearest" });
 }
 
 function render(status) {
@@ -1767,25 +1946,28 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let bd = null; // { g, frames, end, at: index into frames, timer, art: Map name -> url }
 let bdReturn = null;
 
-function watchButton(id, k, g) {
-  const b = el("button", { class: "watch", type: "button" }, "▶ Watch the game");
-  b.addEventListener("click", () => openReplay(id, k, g, b));
-  return b;
-}
-
-async function openReplay(id, k, g, button) {
-  button.disabled = true;
-  const label = button.textContent;
-  button.textContent = "Replaying the game…";
-  const { ok, data } = await api("GET", `/api/history/${encodeURIComponent(id)}/games/${k}/replay`);
-  button.disabled = false;
-  button.textContent = label;
-  if (!ok) { alert(data.error || "Couldn't replay this game."); return; }
+// Opens game k of the tournament on screen (from its row, or the URL); `from` is the button to
+// return focus to. Previous / next game step through the games the filter shows.
+let replayLoading = 0;
+async function openGame(k, from = null) {
+  const f = gamesFilter;
+  const g = f?.game(k);
+  if (!g || !f.replayId || !watchable(g)) return;
+  const first = board.hidden;
+  if (first && view.game !== k) { view.game = k; writeRoute(true); gamePushed = true; }
+  else if (view.game !== k) { view.game = k; writeRoute(); }
+  if (from) { from.disabled = true; from.textContent = "Loading…"; }
+  if (!board.hidden) board.querySelector(".bd-status").textContent = "Replaying the game…";
+  const ticket = ++replayLoading;
+  const { ok, data } = await api("GET", `/api/history/${encodeURIComponent(f.replayId)}/games/${k}/replay`);
+  if (from) { from.disabled = false; from.textContent = "▶ Watch"; }
+  if (ticket !== replayLoading || view.game !== k) return; // another game asked for meanwhile, or closed
+  if (!ok) { alert(data.error || "Couldn't replay this game."); closeReplay(); return; }
   // card art first, so the cards don't pop in while they move
   const names = new Set();
-  for (const f of data.frames) {
-    for (const p of f.players) for (const z of ["hand", "battlefield", "graveyard", "exile"]) for (const c of p[z]) names.add(c.name);
-    for (const s of f.stack) if (s.name) names.add(s.name);
+  for (const fr of data.frames) {
+    for (const p of fr.players) for (const z of ["hand", "battlefield", "graveyard", "exile"]) for (const c of p[z]) names.add(c.name);
+    for (const s of fr.stack) if (s.name) names.add(s.name);
   }
   prefetchCards([...names]);
   const art = new Map();
@@ -1793,14 +1975,37 @@ async function openReplay(id, k, g, button) {
     const uris = c.image_uris || c.card_faces?.[0]?.image_uris;
     if (uris) art.set(n, uris.normal || uris.small);
   }).catch(() => {})));
-  bd = { g, frames: data.frames, end: data.end, art, timer: null, at: 0, prev: null };
-  bdReturn = button;
+  if (ticket !== replayLoading || view.game !== k) return;
+  bdPause();
+  bd = { g, k, frames: data.frames, end: data.end, art, timer: null, at: 0, prev: null };
+  if (first) bdReturn = from || document.activeElement;
   board.querySelector("#board-title").textContent = `${g.a} vs ${g.b}, ${g.onThePlay} on the play`;
   board.hidden = false;
   board.focus();
   bdScrub.max = String(bd.frames.length - 1);
+  bdGameNav();
   bdShow(0, false);
 }
+// The game the URL names, opened once its tournament is on screen.
+function openRoutedGame() {
+  if (view.game != null && (board.hidden || bd?.k !== view.game) && gamesFilter?.game(view.game)) openGame(view.game);
+}
+// Previous / next game among the ones the filter shows (and the open one's place there).
+function bdNeighbours() {
+  const list = gamesFilter?.list().filter((k) => watchable(gamesFilter.game(k))) || [];
+  const at = list.indexOf(bd?.k);
+  return { list, at, prev: at > 0 ? list[at - 1] : null, next: at >= 0 && at < list.length - 1 ? list[at + 1] : null };
+}
+function bdGameNav() {
+  const { list, at, prev, next } = bdNeighbours();
+  board.querySelector(".bd-games").hidden = list.length < 2 || at < 0;
+  board.querySelector(".bd-prev-game").disabled = prev == null;
+  board.querySelector(".bd-next-game").disabled = next == null;
+  board.querySelector(".bd-game-pos").textContent = at >= 0 ? `game ${at + 1} of ${list.length}` : "";
+}
+const stepGame = (d) => { const n = bdNeighbours(); const k = d < 0 ? n.prev : n.next; if (k != null) openGame(k); };
+board.querySelector(".bd-prev-game").addEventListener("click", () => stepGame(-1));
+board.querySelector(".bd-next-game").addEventListener("click", () => stepGame(1));
 
 // The actions of a step to list: all of them, or without the passes.
 const bdActions = (f) => (f.did || []).filter((a) => board.querySelector(".bd-passes").checked || !/ priority: Pass$/.test(a));
@@ -1954,13 +2159,21 @@ function bdPause() {
   board.querySelector(".bd-play").setAttribute("aria-label", "Play");
 }
 const bdToggle = () => bd.timer ? bdPause() : bdPlay();
-function closeReplay() {
-  if (board.hidden) return;
+// route: also take the game out of the URL (going back if opening it added a history entry);
+// false when the URL already changed (Back)
+function closeReplay(route = true) {
+  replayLoading++; // a replay still loading won't open
+  if (board.hidden) { if (route && view.game != null) { view.game = null; writeRoute(); } return; }
   peek.hidden = true;
   bdPause();
   board.hidden = true;
   bd = null;
+  if (route && view.game != null) {
+    view.game = null;
+    if (gamePushed) { gamePushed = false; window.history.back(); } else writeRoute();
+  }
   bdReturn?.focus();
+  bdReturn = null;
 }
 
 // Card size, remembered in this browser
@@ -1991,7 +2204,7 @@ bdTable.addEventListener("focusin", showPeek);
 bdTable.addEventListener("pointerleave", () => { peek.hidden = true; });
 bdTable.addEventListener("focusout", () => { peek.hidden = true; });
 
-board.querySelector(".bd-close").addEventListener("click", closeReplay);
+board.querySelector(".bd-close").addEventListener("click", () => closeReplay());
 board.querySelector(".bd-first").addEventListener("click", () => { bdPause(); bdShow(0); });
 board.querySelector(".bd-prev").addEventListener("click", () => { bdPause(); bdShow(bd.at - 1); });
 board.querySelector(".bd-next").addEventListener("click", () => { bdPause(); bdShow(bd.at + 1); });
@@ -2002,7 +2215,7 @@ board.querySelector(".bd-passes").addEventListener("change", () => bdShow(bd.at,
 // Captured first, so the card view (opened from the board) gets Escape and the arrows while it's up.
 document.addEventListener("keydown", (e) => {
   if (board.hidden || !lightbox.hidden || e.target.closest?.("select, input[type=range]")) return;
-  const keys = { Escape: closeReplay, ArrowLeft: () => { bdPause(); bdShow(bd.at - 1); }, ArrowRight: () => { bdPause(); bdShow(bd.at + 1); },
+  const keys = { Escape: () => closeReplay(), n: () => stepGame(1), p: () => stepGame(-1), ArrowLeft: () => { bdPause(); bdShow(bd.at - 1); }, ArrowRight: () => { bdPause(); bdShow(bd.at + 1); },
     " ": bdToggle, Home: () => { bdPause(); bdShow(0); }, End: () => { bdPause(); bdShow(bd.frames.length - 1); } };
   if (keys[e.key]) { e.preventDefault(); e.stopPropagation(); keys[e.key](); }
 }, true);
@@ -2092,18 +2305,64 @@ function showTree(box, data, g) {
   render();
 }
 
+// The result of a game, from deck a's side: [text, class], and whether it's decisive.
+function gameVerdict(g) {
+  const winner = g.pWinA > 0.999 ? g.a : g.pWinB > 0.999 ? g.b : null;
+  const certainDraw = g.pDraw > 0.999;
+  const text = winner ? `${winner} wins` : certainDraw ? "Draw"
+    : `${g.a} ${(100 * g.pWinA).toFixed(0)}%, draw ${(100 * g.pDraw).toFixed(0)}%, ${g.b} ${(100 * g.pWinB).toFixed(0)}%`;
+  return { text, cls: certainDraw || !winner ? "draw" : "win", winner };
+}
+// a search that ran out of budget (or was stopped) before any result saves only a note, no moves
+const noLine = (g) => g.line.every((s) => /^\(.*\)$/.test(s));
+const watchable = (g) => !noLine(g) && g.replay !== false;
+// Why a game can't be watched, or null if it can.
+const whyNoWatch = (g) => noLine(g)
+  ? (/stopped/.test(g.line.join(" ")) ? "No line to watch: the search was stopped before it had a result."
+    : "No line to watch: the search ran out of its time or node budget before it had a result.")
+  : g.replay === false ? "This game can't be watched: the engine has changed since it was solved, and no longer plays its line the same way."
+  : null;
+
+// The games filter: which deck, against which deck, what result, and words in the decks' names.
+// Results are from the chosen deck's side when there is one.
+const RESULTS = {
+  "": "Any result", win: "Won", loss: "Lost", decisive: "Decisive", draw: "Drawn", unproven: "Unproven",
+};
+function gameMatches(g) {
+  const { deck, vs, result, text } = view;
+  if (deck && g.a !== deck && g.b !== deck) return false;
+  if (vs && g.a !== vs && g.b !== vs) return false;
+  const v = gameVerdict(g);
+  if (result === "draw" && v.winner) return false;
+  if (result === "decisive" && !v.winner) return false;
+  if (result === "win" && (!v.winner || (deck && v.winner !== deck))) return false;
+  if (result === "loss" && (!v.winner || (deck && v.winner === deck))) return false;
+  if (result === "unproven" && g.complete) return false;
+  if (text) {
+    const hay = `${g.a} ${g.b}`.toLowerCase();
+    if (!text.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+
+let gamesFilter = null; // the Games tab on screen: { sync() } puts view's filter into it
+const GAMES_PAGE = 50;
+
 // replayId: the saved tournament the games belong to, for animated replays
 // treesId: the saved tournament whose games have search trees to browse; null if none
 function renderResults(r, treesId = null, replayId = null) {
   const names = r.entries.map((e) => e.name);
   const sc = scoring();
-  const standings = el("ol", { class: "standings" }, ...ranked(r.standings, sc).map((s, i) =>
-    el("li", {},
+  const standings = el("ol", { class: "standings" }, ...ranked(r.standings, sc).map((s, i) => {
+    const name = el("button", { class: "standing-name linkish", type: "button", title: `Show ${s.name}'s games` }, s.name);
+    name.addEventListener("click", () => showGames(s.name));
+    return el("li", {},
       el("span", { class: "rank" }, String(i + 1)),
-      el("span", {}, el("span", { class: "standing-name" }, s.name), el("span", { class: "standing-cards" }, ...cardLinks(s.cards))),
+      el("span", {}, name, el("span", { class: "standing-cards" }, ...cardLinks(s.cards))),
       el("span", { class: "pts" }, score(s, sc),
         el("span", { class: "record" }, (sc.percent ? `${fmt(s.points)} of ${fmt(sc.win * (s.wins + s.draws + s.losses))} pts, ` : "")
-          + `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)))));
+          + `${fmt(s.wins)} won, ${fmt(s.draws)} drawn, ${fmt(s.losses)} lost`)));
+  }));
 
   // Points row i scored against column j over their two games. The saved matrix is null where
   // there's nothing to score: the diagonal, and pairs with a game left unplayed.
@@ -2118,59 +2377,136 @@ function renderResults(r, treesId = null, replayId = null) {
       if (i === j) return el("td", { class: "self" }, "–");
       if (saved == null) return el("td", { class: "unplayed", title: `${n} vs ${names[j]}: not all games played` }, "·");
       const p = against(i, j);
-      return Object.assign(el("td", { title: `${n}: ${fmt(p)} of ${2 * sc.win} points` }, fmt(p)), { style: `background:${cellColor(p, sc)}` });
+      const cell = el("td", { class: "pair", tabindex: "0", role: "button",
+        title: `${n}: ${fmt(p)} of ${2 * sc.win} points against ${names[j]}. Show their games` }, fmt(p));
+      cell.style.background = cellColor(p, sc);
+      cell.addEventListener("click", () => showGames(n, names[j]));
+      cell.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showGames(n, names[j]); } });
+      return cell;
     })));
   const matrix = el("div", { class: "matrix-wrap" }, el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, ...rows)));
 
-  const games = r.games.map((g, k) => {
-    const winner = g.pWinA > 0.999 ? g.a : g.pWinB > 0.999 ? g.b : null;
-    const certainDraw = g.pDraw > 0.999;
-    const verdict = winner ? `${winner} wins` : certainDraw ? "Draw"
-      : `${g.a} ${(100 * g.pWinA).toFixed(0)}%, draw ${(100 * g.pDraw).toFixed(0)}%, ${g.b} ${(100 * g.pWinB).toFixed(0)}%`;
-    const cls = certainDraw || !winner ? "draw" : "win";
-    // a search that ran out of budget (or was stopped) before any result saves only a note, no moves
-    const noLine = g.line.every((s) => /^\(.*\)$/.test(s));
-    const steps = g.line.map((s) => s.startsWith("=>")
-      ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " ")
-        .replace(/\(([AB])'s turn\)/, (_, p) => `(${p === "A" ? g.a : g.b}'s turn)`))
-      : el("li", {}, s.replace(/^A /, g.a + ": ").replace(/^B /, g.b + ": ").replace(/^Chance /, "Chance: ")));
-    return el("details", {},
-      el("summary", {},
-        el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
-        el("span", { class: "verdict " + cls }, verdict),
+  const notPlayed = r.notPlayed || [];
+
+  // ---- the games, filtered; rows are built for the shown ones only, a game's line when it's opened
+  const games = r.games.map((g, k) => ({ g, k }));
+  const list = el("ul", { class: "games" });
+  const count = el("p", { class: "games-count", "aria-live": "polite" });
+  const more = el("p", { class: "more-games" });
+  let limit = GAMES_PAGE;
+  let matching = [];
+
+  const select = (id, label, options) => {
+    const s = el("select", { id }, ...options.map(([v, t]) => el("option", { value: v }, t)));
+    return [el("label", { for: id }, label, s), s];
+  };
+  const deckOptions = [["", "Any deck"], ...[...names].sort((a, b) => a.localeCompare(b)).map((n) => [n, n])];
+  const [deckLabel, deckPick] = select("games-deck", "Deck", deckOptions);
+  const [vsLabel, vsPick] = select("games-vs", "Against", [["", "Any deck"], ...deckOptions.slice(1)]);
+  const [resultLabel, resultPick] = select("games-result", "Result", Object.entries(RESULTS));
+  const textBox = el("input", { type: "search", id: "games-text", placeholder: "Words in the decks' names" });
+  const clear = el("button", { type: "button", class: "clear" }, "Show all games");
+
+  function row({ g, k }) {
+    const v = gameVerdict(g);
+    let filled = false;
+    const details = el("details", {});
+    const why = replayId ? whyNoWatch(g) : null;
+    const watch = !replayId ? null : why
+      ? el("span", { class: "no-watch", title: why }, "can't watch")
+      : el("button", { type: "button", class: "watch-row", title: "Watch the game" }, "▶ Watch");
+    if (watch && !why) watch.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openGame(k, watch); });
+    details.append(el("summary", {},
+      el("span", { class: "g-what" },
+        el("span", {}, `${g.a} vs ${g.b}`),
+        el("span", { class: "g-play" }, `${g.onThePlay} on the play`),
+        el("span", { class: "verdict " + v.cls }, v.text),
         g.complete ? null : el("span", { class: "unproven" },
-          (noLine ? "no result" : `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`)
+          (noLine(g) ? "no result" : `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`)
           // what the search proved anyway: one side can't lose (the other's win was refuted)
           + (g.cantLose ? `; ${g.cantLose === "a" ? g.a : g.b} can't lose` : "")),
         g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
-      el("ol", { class: "line" }, ...steps),
-      !replayId ? null : noLine
-        ? el("p", { class: "caption" }, /stopped/.test(g.line.join(" "))
-          ? "No line to watch: the search was stopped before it had a result."
-          : "No line to watch: the search ran out of its time or node budget before it had a result.")
-        : g.replay === false ? el("p", { class: "caption" }, "This game can't be watched: the engine has changed since it was solved, and no longer plays its line the same way.")
-        : watchButton(replayId, k, g),
-      treesId ? treeBrowser(treesId, k, g) : null);
-  });
+      watch || el("span")));
+    details.addEventListener("toggle", () => {
+      if (!details.open || filled) return;
+      filled = true;
+      const steps = g.line.map((s) => s.startsWith("=>")
+        ? el("li", { class: "end" }, s.replace(/^=>\s*/, "").replace(/^A /, g.a + " ").replace(/^B /, g.b + " ")
+          .replace(/\(([AB])'s turn\)/, (_, p) => `(${p === "A" ? g.a : g.b}'s turn)`))
+        : el("li", {}, s.replace(/^A /, g.a + ": ").replace(/^B /, g.b + ": ").replace(/^Chance /, "Chance: ")));
+      details.append(el("div", { class: "g-body" },
+        el("ol", { class: "line" }, ...steps),
+        why ? el("p", { class: "caption" }, why) : null,
+        treesId ? treeBrowser(treesId, k, g) : null));
+    });
+    return el("li", { "data-k": String(k) }, details);
+  }
 
-  const notPlayed = r.notPlayed || [];
-  const unplayedNote = notPlayed.length ? [
-    el("h3", {}, "Not played"),
-    el("p", { class: "caption" }, "The tournament was stopped before these games finished. Standings count only the games played."),
-    el("ul", { class: "log" }, ...notPlayed.map((g) => el("li", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play`))),
-  ] : [];
+  function update() {
+    matching = games.filter(({ g }) => gameMatches(g));
+    const shown = matching.slice(0, limit);
+    list.replaceChildren(...shown.map(row));
+    if (!matching.length) list.append(el("li", { class: "empty" }, "No games match."));
+    const filtered = matching.length < games.length;
+    count.textContent = filtered ? `${matching.length} of ${games.length} games` : `${games.length} games`;
+    clear.hidden = !filtered;
+    const rest = matching.length - shown.length;
+    more.replaceChildren(...(rest > 0 ? [Object.assign(el("button", { type: "button" }, `Show ${Math.min(rest, GAMES_PAGE)} more (${rest} not shown)`),
+      { onclick: () => { limit += GAMES_PAGE; update(); } })] : []));
+    resultPick.options[1].textContent = view.deck ? `Won by ${view.deck}` : "Won (decisive)";
+    resultPick.options[2].textContent = view.deck ? `Lost by ${view.deck}` : "Lost (decisive)";
+  }
+  // the filter controls follow view (set from the URL, the standings or the table); the list is
+  // rebuilt only when the filter changed, so a poll doesn't close the games you have open
+  let synced = null;
+  function sync() {
+    if (!names.includes(view.deck)) view.deck = "";
+    if (!names.includes(view.vs) || view.vs === view.deck) view.vs = "";
+    if (!(view.result in RESULTS)) view.result = "";
+    const key = JSON.stringify([view.deck, view.vs, view.result, view.text]);
+    if (key === synced) return;
+    synced = key;
+    deckPick.value = view.deck; vsPick.value = view.vs; resultPick.value = view.result;
+    if (textBox.value !== view.text) textBox.value = view.text;
+    limit = GAMES_PAGE;
+    update();
+  }
+  const changed = () => {
+    Object.assign(view, { deck: deckPick.value, vs: vsPick.value, result: resultPick.value, text: textBox.value.trim() });
+    writeRoute();
+    sync();
+  };
+  for (const c of [deckPick, vsPick, resultPick]) c.addEventListener("change", changed);
+  textBox.addEventListener("input", changed);
+  clear.addEventListener("click", () => { Object.assign(view, { deck: "", vs: "", result: "", text: "" }); writeRoute(); sync(); });
+  // the games the replay steps through: the ones the filter shows, in order
+  gamesFilter = { sync, list: () => matching.map(({ k }) => k), game: (k) => r.games[k], replayId };
+
+  const tab = (id, label, n) => {
+    const b = el("button", { type: "button", role: "tab", "data-tab": id }, label, n == null ? null : el("span", { class: "n" }, ` ${n}`));
+    b.addEventListener("click", () => setTab(id));
+    return b;
+  };
+  const panel = (id, ...children) => el("div", { class: "tab-panel", "data-tab": id, role: "tabpanel" }, ...children);
 
   return [
-    standings,
-    el("h3", {}, "Matchups"),
-    matrix,
-    el("p", { class: "caption" }, `Points each row deck scored against each column deck over their two games: ${2 * sc.win} means it won both, ${2 * sc.draw} means two draws.`
-      + (notPlayed.length ? " A dot marks a pair with a game left unplayed." : "")),
-    el("h3", {}, "Games"),
-    el("p", { class: "caption" }, "Open a game to see the optimal line of play the solver found"
-      + (treesId ? ", and browse the tree it searched." : ".")),
-    ...games,
-    ...unplayedNote,
+    el("div", { class: "tabs", role: "tablist" }, tab("standings", "Standings"), tab("matchups", "Matchups"), tab("games", "Games", r.games.length)),
+    panel("standings", standings,
+      el("p", { class: "caption" }, "Click a deck to see its games.")),
+    panel("matchups", matrix,
+      el("p", { class: "caption" }, `Points each row deck scored against each column deck over their two games: ${2 * sc.win} means it won both, ${2 * sc.draw} means two draws.`
+        + (notPlayed.length ? " A dot marks a pair with a game left unplayed." : "") + " Click a cell to see the pair's games.")),
+    panel("games",
+      el("div", { class: "game-filters" }, deckLabel, vsLabel, resultLabel, el("label", { for: "games-text" }, "Search", textBox), clear),
+      count,
+      el("p", { class: "caption", style: "margin: 0 0 .5rem" }, "Open a game to see the optimal line of play the solver found"
+        + (treesId ? ", and browse the tree it searched." : ".")),
+      list, more,
+      ...(notPlayed.length ? [
+        el("h3", {}, "Not played"),
+        el("p", { class: "caption" }, "The tournament was stopped before these games finished. Standings count only the games played."),
+        el("ul", { class: "log" }, ...notPlayed.map((g) => el("li", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play`))),
+      ] : [])),
   ];
 }
 
@@ -2180,8 +2516,8 @@ const size = (bytes) => bytes < 1024 ? `${bytes} B`
   : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const plural = (n, word, words = word + "s") => `${n.toLocaleString()} ${n === 1 ? word : words}`;
 
-function showView() {
-  const stats = location.hash === "#stats";
+function showView(stats = location.hash === "#stats") {
+  if (PUBLIC) stats = false;
   $("main").hidden = stats;
   $("#stats").hidden = !stats;
   for (const [link, on] of [["#view-main", !stats], ["#view-stats", stats]]) {
@@ -2189,7 +2525,6 @@ function showView() {
   }
   if (stats) loadStats();
 }
-window.addEventListener("hashchange", showView);
 
 async function loadStats() {
   const { ok, data } = await api("GET", "/api/stats");
@@ -2239,7 +2574,11 @@ function renderStats(s) {
 
   const cut = h.games - h.proven;
   const slow = h.slowest;
-  const showTournament = (id) => { viewing = id; location.hash = ""; renderHistory(); showSaved(); };
+  const showTournament = (id) => {
+    viewing = id;
+    Object.assign(view, { tab: "standings", deck: "", vs: "", result: "", text: "", game: null });
+    location.hash = routeHash().slice(1) || "t=" + encodeURIComponent(id); // leaves #stats: applyRoute shows it
+  };
   const slowLink = slow ? el("button", { class: "linkish", type: "button" },
     `${slow.a} vs ${slow.b}, ${duration(slow.seconds)}`) : null;
   slowLink?.addEventListener("click", () => showTournament(slow.id));
@@ -2377,6 +2716,12 @@ async function loadQueue() {
     el("span", { class: "q-reply" }, `${r.kind === "matchup" ? "Matchup" : "Deck"}, asked ${when(r.at)}` + (r.reply ? ` · ${r.reply}` : "")))));
 }
 
+{
+  // the view the URL asks for, before anything loads (loadHistory drops a tournament that's gone)
+  const r = readRoute();
+  viewing = r.t;
+  Object.assign(view, { tab: r.tab, deck: r.deck, vs: r.vs, result: r.result, text: r.text, game: r.game });
+}
 if (PUBLIC) {
   loadHistory().then(() => render({ state: "idle" }));
   loadQueue();

@@ -81,8 +81,15 @@ filters the entries with Scryfall-style syntax (`t:creature -c:u`, `lands>=2`, `
 `added>=2026-10`, `or` and parentheses; *Search syntax* lists it all), keeps the query in the URL,
 and the card view's *Entries with this card* searches for that card. Tick the entries to include to run a
 tournament on just some of them. Each finished tournament is saved as a JSON file in the
-`--history` folder (default `history`); the page lists them, newest first, and lets you view or
-delete each one. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
+`--history` folder (default `history`); *Tournament* above the results picks one (newest first,
+with ‹ › to step through them) or deletes it. A tournament's results are in three tabs:
+*Standings* (click a deck for its games), *Matchups* (the points table; click a cell for that
+pair's games) and *Games*, which filters the games by deck, opponent, result (from the chosen deck's
+side) and words in the decks' names, 50 at a time; each game's row has *▶ Watch*, and opening it
+shows the optimal line. The tournament, tab, filter and the game being watched are kept in the
+URL's hash (`#t=<id>&tab=games&deck=…&game=7`), so a link opens the same view (on the public site
+too) and Back closes a replay. On a wide screen the entries column scrolls on its own; on a phone
+the results come first. *Search settings* (next to *Run tournament*) set the time and node budget per game, the turn
 limit and exact turns; they default to the CLI's defaults. The web UI first searches each game to
 turn 2, then at the full limit, so a game that runs out of budget still has a result (proven to
 turn 2) and a line to watch; that first search costs about 15% more nodes. *Stop* ends a running tournament early:
@@ -162,9 +169,10 @@ budget it has used. Expanding a game shows the line its search is on: each decis
 of the game, the option being tried there and how many of its options have been tried (the first
 30 decisions; the deeper ones change too fast to follow).
 
-*Watch the game* (in each finished game) replays its optimal line on an animated board: both
+*▶ Watch* (on each finished game's row) replays its optimal line on an animated board: both
 players' hands, battlefields, graveyards and exile, the stack, life totals, and the turn and phase,
-with play/pause, stepping (arrow keys) and a scrubber. The server replays the saved line in Forge
+with play/pause, stepping (arrow keys) and a scrubber. *Previous game* / *Next game* (P / N) go
+through the games the Games tab's filter shows, without closing the board. The server replays the saved line in Forge
 and snapshots the board at the end of each step of each turn (`GameReplay`), so tournaments saved
 earlier can be watched too. It advances one step of the turn at a time (untap, upkeep, draw, main
 phase, the combat steps, and so on), listing the actions taken in that step; steps the rules skip
