@@ -80,8 +80,19 @@ public class SolverController extends PlayerControllerAi {
     }
 
     private int decide(String kind, List<String> labels, boolean transposable) {
-        return tape.decide(me(), kind, labels, getGame().getPhaseHandler().getTurn(),
-                () -> transposable ? position(kind, labels) : null);
+        // a narrowed player (one-sided searches) sees only some of the options; the choice maps back
+        int[] keep = tape.kept(me(), kind, labels.size());
+        List<String> shown = labels;
+        if (keep != null) {
+            shown = new ArrayList<>(keep.length);
+            for (int i : keep) {
+                shown.add(labels.get(i));
+            }
+        }
+        List<String> options = shown;
+        int choice = tape.decide(me(), kind, options, getGame().getPhaseHandler().getTurn(),
+                () -> transposable ? position(kind, options) : null);
+        return keep == null ? choice : keep[choice];
     }
 
     // ---------------------------------------------------------------- game start
@@ -96,11 +107,27 @@ public class SolverController extends PlayerControllerAi {
         return true; // 3CB: no mulligans
     }
 
-    /** Leylines, Gemstone Caverns, Chancellors: which to use (in the order Forge lists them). */
+    /**
+     * Leylines, Gemstone Caverns, Chancellors: which to use (in the order Forge lists them).
+     *
+     * Opening-hand rule: a player always uses every one they can, so declining isn't searched,
+     * unless a card in the game can change control of a permanent (a Leyline the opponent could
+     * take is a reason to keep it in hand), or one of them costs another card from the hand
+     * (Gemstone Caverns exiles one, and Forge's AI picks which: it can pick the card that wins).
+     */
     @Override
     public List<SpellAbility> chooseSaToActivateFromOpeningHand(List<SpellAbility> usable) {
         if (usable.size() > 6) {
             return super.chooseSaToActivateFromOpeningHand(usable);
+        }
+        if (!exhaustive && !usable.isEmpty() && usable.stream().noneMatch(SolverController::costsACard)
+                && !canChangeControl(getGame())) {
+            List<String> names = new ArrayList<>();
+            for (SpellAbility sa : usable) {
+                names.add(sa.getHostCard().getName());
+            }
+            decide("opening hand", List.of("From opening hand: " + String.join(", ", names)), false);
+            return usable;
         }
         Equivalence eq = equivalence();
         Map<String, List<SpellAbility>> subsets = new LinkedHashMap<>();
@@ -127,6 +154,69 @@ public class SolverController extends PlayerControllerAi {
             labels.add(labels.contains(label) ? label + " (" + labels.size() + ")" : label);
         }
         return options.get(decide("opening hand", labels, false));
+    }
+
+    /** Whether an opening-hand action also takes another card out of the hand (exile or discard). */
+    static boolean costsACard(SpellAbility first) {
+        for (SpellAbility a = first; a != null; a = a.getSubAbility()) {
+            ApiType api = a.getApi();
+            if (api == ApiType.Discard) {
+                return true;
+            }
+            if (api == ApiType.ChangeZone && a.hasParam("Origin") && a.getParam("Origin").contains("Hand")
+                    && !"Self".equals(a.getParam("Defined"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether any card in the game (any zone, any face) has an effect that changes control of a
+     * permanent: gain or exchange control, or control of a spell, which becomes a permanent.
+     */
+    static boolean canChangeControl(Game game) {
+        for (Card c : game.getCardsInGame()) {
+            for (forge.card.CardStateName name : c.getStates()) {
+                forge.game.card.CardState state = c.getState(name);
+                for (SpellAbility sa : state.getSpellAbilities()) {
+                    if (changesControl(sa)) {
+                        return true;
+                    }
+                }
+                for (forge.game.trigger.Trigger t : state.getTriggers()) {
+                    if (changesControl(t.ensureAbility())) {
+                        return true;
+                    }
+                }
+                for (forge.game.staticability.StaticAbility st : state.getStaticAbilities()) {
+                    if (st.hasParam("GainControl")) {
+                        return true;
+                    }
+                }
+                // Abilities only reachable through SVars (charm modes, delayed triggers...)
+                for (String v : state.getSVars().values()) {
+                    if (CONTROL_EFFECT.matcher(v).find()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static final java.util.regex.Pattern CONTROL_EFFECT = java.util.regex.Pattern.compile(
+            "\\$\\s*(GainControl|GainControlVariant|ExchangeControl|ExchangeControlVariant|ControlSpell)\\b|GainControl\\$");
+
+    private static boolean changesControl(SpellAbility first) {
+        for (SpellAbility a = first; a != null; a = a.getSubAbility()) {
+            ApiType api = a.getApi();
+            if (api == ApiType.GainControl || api == ApiType.GainControlVariant || api == ApiType.ExchangeControl
+                    || api == ApiType.ExchangeControlVariant || api == ApiType.ControlSpell) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------- priority
@@ -285,15 +375,20 @@ public class SolverController extends PlayerControllerAi {
         return phase == PhaseType.COMBAT_END && previous == PhaseType.COMBAT_DAMAGE;
     }
 
-    /** Every non-mana spell/ability the player could legally start playing right now. */
+    /**
+     * Every spell/ability the player could legally start playing right now. Mana abilities only
+     * when tapping for the mana alone is worth it (Pristine Talisman's life, City of Brass's damage:
+     * see {@link ManaTaps}); other mana sources are tapped while paying for something.
+     */
     private List<SpellAbility> candidateAbilities() {
         Game game = getGame();
         CardCollection cards = ComputerUtilAbility.getAvailableCards(game, player);
         cards = ComputerUtilCard.dedupeCards(cards);
         List<SpellAbility> all = ComputerUtilAbility.getSpellAbilities(cards, player);
         List<SpellAbility> result = new ArrayList<>();
+        List<SpellAbility> mana = new ArrayList<>(); // listed last: tried after the real actions
         for (SpellAbility sa : ComputerUtilAbility.getOriginalAndAltCostAbilities(all, player)) {
-            if (sa.isManaAbility()) {
+            if (sa.isManaAbility() && !ManaTaps.hasSideEffect(sa)) {
                 continue;
             }
             sa.setActivatingPlayer(player);
@@ -310,8 +405,9 @@ public class SolverController extends PlayerControllerAi {
             if (TargetEnumerator.targetingParts(sa).isEmpty() && !sa.costHasManaX() && !announcesX(sa) && !ComputerUtilCost.canPayCost(sa, player, false)) {
                 continue;
             }
-            result.add(sa);
+            (sa.isManaAbility() ? mana : result).add(sa);
         }
+        result.addAll(mana);
         return result;
     }
 

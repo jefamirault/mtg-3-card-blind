@@ -48,6 +48,11 @@ public final class DecisionTape {
     private final List<String> expected;
     /** Told each branching decision taken, as its trace line, before it takes effect; may be null. */
     private Consumer<String> observer;
+    /** The player whose options are narrowed (see {@link #narrow}), or -1. */
+    private int narrowPlayer = -1;
+    private int narrowWidth;
+    /** Set when narrowing leaves out an option (shared by the tapes of one search); may be null. */
+    private java.util.concurrent.atomic.AtomicBoolean cut;
 
     /** @param steps the choice at each successive branching decision */
     public DecisionTape(Step[] steps, int turnLimit) {
@@ -83,6 +88,41 @@ public final class DecisionTape {
         for (int i = 0; i < choices.length; i++) {
             steps[i] = new Step(choices[i], checksums[i], -1, false);
         }
+    }
+
+    /**
+     * Narrows {@code player}'s priority, attack and block decisions to {@code width} options: the
+     * first width - 1 and the last (Pass, no attack, no blocks). For one-sided searches, where only
+     * the side building a proof is narrowed. Every replay of a line must narrow the same way.
+     */
+    public DecisionTape narrow(int player, int width, java.util.concurrent.atomic.AtomicBoolean cut) {
+        if (width < 2) {
+            throw new IllegalArgumentException("width " + width);
+        }
+        this.narrowPlayer = player;
+        this.narrowWidth = width;
+        this.cut = cut;
+        return this;
+    }
+
+    /**
+     * The options {@code player} keeps at a decision with {@code n} options (indexes into them,
+     * in order), or null for all of them.
+     */
+    int[] kept(int player, String kind, int n) {
+        if (player != narrowPlayer || n <= narrowWidth
+                || !(kind.equals("priority") || kind.equals("attack") || kind.equals("block"))) {
+            return null;
+        }
+        int[] keep = new int[narrowWidth];
+        for (int i = 0; i < narrowWidth - 1; i++) {
+            keep[i] = i;
+        }
+        keep[narrowWidth - 1] = n - 1;
+        if (cut != null) {
+            cut.set(true);
+        }
+        return keep;
     }
 
     void pauseAtNewDecisions(Continuation.Handoff handoff) {

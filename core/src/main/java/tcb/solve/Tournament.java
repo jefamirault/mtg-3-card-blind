@@ -223,7 +223,8 @@ public final class Tournament {
                                     entries.get(a).name(), entries.get(b).name(),
                                     entries.get(s == 0 ? a : b).name(),
                                     r.describe().replace("A ", entries.get(a).name() + " ").replace("B ", entries.get(b).name() + " "),
-                                    r.complete() ? "" : " (unproven beyond turn " + r.provenTurns() + ")",
+                                    r.unprovenNote().replace("A can't", entries.get(a).name() + " can't")
+                                            .replace("B can't", entries.get(b).name() + " can't"),
                                     cached ? " (cached)" : ""));
                             if (live[0] != null) {
                                 running.remove(live[0]);

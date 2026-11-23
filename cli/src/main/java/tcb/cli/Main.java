@@ -142,7 +142,7 @@ public final class Main {
             for (int start = 0; start < 2; start++) {
                 GameResult r = new Solver(a, b, start, search.toOptions()).solve();
                 OUT.printf("%n%s on the play: %s%s  [%d nodes, %.1fs]%n", start == 0 ? "A" : "B", r.describe(),
-                        r.complete() ? "" : " (unproven beyond turn " + r.provenTurns() + ")",
+                        r.unprovenNote(),
                         r.nodes(), r.elapsed().toMillis() / 1000.0);
                 r.principalVariation().forEach(line -> OUT.println("    " + line));
             }

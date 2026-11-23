@@ -60,6 +60,12 @@ public final class ResultsJson {
             m.put("pDraw", g.result().pDraw());
             m.put("pWinB", g.result().pLoss());
             m.put("complete", g.result().complete());
+            // what an unfinished search proved anyway: "a" or "b" can't lose (absent if nothing)
+            switch (g.result().bound()) {
+                case A_CANT_LOSE -> m.put("cantLose", "a");
+                case B_CANT_LOSE -> m.put("cantLose", "b");
+                default -> { }
+            }
             m.put("provenTurns", g.result().provenTurns());
             m.put("nodes", g.result().nodes());
             m.put("seconds", g.result().elapsed().toMillis() / 1000.0);

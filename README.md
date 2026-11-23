@@ -205,7 +205,8 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
     targets (including spells on the stack, so counterspells work, and every way to divide
     "divided as you choose" damage)
   - targets of triggered abilities and of chosen modes, and the order of simultaneous triggers
-  - which permanents pay a mana cost
+  - which permanents pay a mana cost, and tapping for mana at a priority stop when the ability
+    does something besides making mana (Pristine Talisman's life; see *Mana abilities* below)
   - attack and block assignments, and how combat damage is divided among blockers (and trample)
   - leylines and other opening-hand actions
   - optional costs and "may" abilities
@@ -219,11 +220,38 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   (which Memnite attacks, which identical creature a removal spell hits) are one option. A card
   that anything refers to (attachments, remembered cards, targets on the stack, ...) is never
   merged. The draw step when nobody drew, and the end of combat step right after combat damage,
-  offer nothing the step before didn't, so nobody acts there. `--exhaustive` turns this off, and
-  the tests check it doesn't change results.
+  offer nothing the step before didn't, so nobody acts there.
+- **Mana abilities (Sid's rule).** Tapping a permanent for mana that then goes unspent gains
+  nothing, unless the ability also does something else. So a mana ability is offered at a
+  priority stop only if it puts a counter on its own permanent, deals damage, has a life payment
+  or makes a player gain life, or the permanent has a "whenever this becomes tapped" trigger that
+  does (City of Brass). Every other mana source is tapped only while paying a cost. (Offering
+  every tap and cutting the wasted ones at the end of the step searched 20 to 35 times more
+  nodes.)
+- **Opening-hand actions.** Leylines, Chancellors and the like are always used: declining isn't
+  searched, unless a card in the game can change control of a permanent (a Leyline the opponent
+  could take is a reason to keep it in hand) or the action costs another card from the hand
+  (Gemstone Caverns exiles one, and Forge's AI picks which).
+
+  `--exhaustive` turns these reductions off, and the tests check they don't change results.
 - **Search.**
   - Deterministic games: two null-window alpha-beta passes ("can A force a win?", then "can B
     force a win?"). These are fast because most 3CB games are draws.
+  - **Narrowed searches first.** A proof that X wins only needs X's moves to be good, and X's
+    opponent's moves all covered; a proof that X can't win is the other way round. So before
+    each full pass, the solver tries to settle the question with one side's options cut down:
+    at its priority, attack and block decisions that side keeps only the first two options and
+    the last (Pass, no attack, no blocks). With X's opponent narrowed, X still not winning
+    proves X can't; with X narrowed, X winning proves X can. Each try may use a fifth of the
+    remaining budget, and a try that never had to leave anything out counts as the full search.
+    Otherwise the full pass runs as before. This never changes a result (`NarrowingTest`), but
+    it's **off by default** (`Options.narrowing`): on 20 hard games of a 28-entry tournament
+    (120 s each) it proved nothing more, since those games are deep (no position repeats over
+    up to 99 turns) rather than wide, and its tries cost budget.
+  - **Partial results.** When the budget runs out, a pass that was refuted without any line
+    reaching the turn limit still proves that side can't force a win, so an unproven game can
+    say "A can't lose" or "B can't lose" (in the CLI, the tournament log, the results JSON as
+    `cantLose`, and the web UI).
   - Games with randomness: a full expectimax search.
   - Both use a transposition table keyed on Forge's own game-state dump, plus each permanent's
     current characteristics (the dump leaves out temporary changes, such as an animated land).
@@ -261,7 +289,8 @@ examples/decks/  sample decks for the CLI
 examples/entries/  starter field for the web UI
 ```
 
-Tests: `mise exec -- mvn test` (about three minutes).
+Tests: `mise exec -- mvn test` (about five minutes). Tests tagged `@Tag("slow")` (long exhaustive
+comparisons) run only with `-Pslow`.
 
 Benchmarks: `./tcb solve examples/decks/goblin-guide.txt examples/decks/swords.txt` (a draw,
 about 1,300 nodes per game) and `./tcb solve examples/bench/memnite.txt examples/bench/treetop.txt`
@@ -276,6 +305,11 @@ nodes per game).
     turn limit. Use `--exact-turns` to rule that out.
   - Repetition draws found along one line can leak into table entries reused elsewhere (the
     usual "graph history" caveat).
+  - Plain mana sources are only tapped while paying, so floating mana in response to something
+    (tapping a land in response to its destruction, or tapping a creature so "destroy target
+    untapped creature" fizzles) isn't searched.
+  - Always using opening-hand actions misses the rare game where declining is better for some
+    other reason.
 - **Choices left to Forge's AI.** A few decisions still use the AI's heuristics instead of
   branching:
   - which colour a mana ability produces, and paying with sources that don't tap (e.g. a

@@ -44,9 +44,21 @@ public final class Solver {
      * @param exhaustive     branch on every option: don't merge options that only swap identical
      *                       cards, and don't skip priority windows that repeat earlier ones. Slower;
      *                       for checking that those reductions don't change results.
+     * @param narrowing      before each full "can X force a win?" search, try to settle it with one
+     *                       side's options narrowed (see {@link #NARROW_WIDTH}): with X's opponent
+     *                       narrowed, a failure to win still proves X can't; with X narrowed, a win
+     *                       still proves X wins. Never changes a result, only how fast it's found.
+     *                       Off by default: on 20 hard games of a 28-entry tournament (120 s each)
+     *                       it proved nothing more, since they're deep rather than wide, and its
+     *                       tries cost budget. Ignored when exhaustive.
      */
     public record Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
-                          boolean exhaustive, boolean jumpToLimit) {
+                          boolean exhaustive, boolean jumpToLimit, boolean narrowing) {
+        public Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
+                       boolean exhaustive, boolean jumpToLimit) {
+            this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, jumpToLimit, false);
+        }
+
         public Options(int maxTurns, int firstTurnLimit, long nodeBudget, Duration timeBudget, boolean exactTurns,
                        boolean exhaustive) {
             this(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, false);
@@ -61,9 +73,22 @@ public final class Solver {
         }
 
         public Options withExhaustive(boolean exhaustive) {
-            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, jumpToLimit);
+            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, jumpToLimit, narrowing);
+        }
+
+        public Options withNarrowing(boolean narrowing) {
+            return new Options(maxTurns, firstTurnLimit, nodeBudget, timeBudget, exactTurns, exhaustive, jumpToLimit, narrowing);
         }
     }
+
+    /**
+     * How many options a narrowed player keeps at a priority, attack or block decision: the first
+     * NARROW_WIDTH - 1 in the controller's order (actions before passing, biggest attacks first),
+     * and the last (Pass, no attack, no blocks).
+     */
+    public static final int NARROW_WIDTH = 3;
+    /** Share of the remaining budget each narrowed search may use before giving up. */
+    static final double NARROW_SHARE = 0.2;
 
     /**
      * @param pWin              probability deck A wins under optimal play
@@ -77,7 +102,23 @@ public final class Solver {
      * @param principalVariation the optimal line found, as readable decisions
      */
     public record GameResult(double pWin, double pDraw, double pLoss, int provenTurnLimit, boolean complete,
-                             List<String> principalVariation, long nodes, Duration elapsed) {
+                             List<String> principalVariation, long nodes, Duration elapsed, Bound bound) {
+        public GameResult(double pWin, double pDraw, double pLoss, int provenTurnLimit, boolean complete,
+                          List<String> principalVariation, long nodes, Duration elapsed) {
+            this(pWin, pDraw, pLoss, provenTurnLimit, complete, principalVariation, nodes, elapsed, Bound.UNKNOWN);
+        }
+
+        public GameResult {
+            bound = bound == null ? Bound.UNKNOWN : bound;
+        }
+
+        /**
+         * What an unfinished search proved anyway: a side that can't lose (the other side's "can I
+         * force a win?" pass was refuted without any line running into the turn limit). UNKNOWN for
+         * a complete result (the result says it all) and for games with random events.
+         */
+        public enum Bound { UNKNOWN, A_CANT_LOSE, B_CANT_LOSE }
+
         /** {@link #provenTurnLimit()} in turn cycles, as shown to people. */
         public int provenTurns() {
             return provenTurnLimit / 2;
@@ -96,6 +137,22 @@ public final class Solver {
             return p < 1e-9 || p > 1 - 1e-9;
         }
 
+        /**
+         * "" for a complete result; otherwise how far it's proven, and what the search proved anyway:
+         * " (unproven beyond turn 2; A can't lose)".
+         */
+        public String unprovenNote() {
+            if (complete) {
+                return "";
+            }
+            String can = switch (bound) {
+                case A_CANT_LOSE -> "; A can't lose";
+                case B_CANT_LOSE -> "; B can't lose";
+                case UNKNOWN -> "";
+            };
+            return " (unproven beyond turn " + provenTurns() + can + ")";
+        }
+
         public String describe() {
             if (isRandom()) {
                 return String.format("A wins %.1f%%, draw %.1f%%, B wins %.1f%%", 100 * pWin, 100 * pDraw, 100 * pLoss);
@@ -106,6 +163,13 @@ public final class Solver {
 
     private static final class BudgetExceeded extends RuntimeException {
         BudgetExceeded() {
+            super(null, null, false, false);
+        }
+    }
+
+    /** A narrowed search used up its share of the budget (the search goes on without it). */
+    private static final class AttemptExceeded extends RuntimeException {
+        AttemptExceeded() {
             super(null, null, false, false);
         }
     }
@@ -178,6 +242,25 @@ public final class Solver {
     private boolean sawChance;
     /** Whether the search for the current turn limit had a game end at that limit. */
     private boolean limitHit;
+    /**
+     * Proven so far, at any turn limit: A (B) can't force a win, because that side's pass was
+     * refuted without any line ending at the turn limit. Kept when the budget runs out later.
+     */
+    private boolean aCantWin, bCantWin;
+    /** Whether any pass met a random event: then the null-window passes don't bound the result. */
+    private boolean sawChanceEver;
+    /** The player narrowed in the current search (see {@link Options#narrowing}), or -1. */
+    private int narrowPlayer = -1;
+    /** The current narrowed search's own node and time limits; it gives up past them. */
+    private long attemptNodes = Long.MAX_VALUE;
+    private long attemptDeadline = Long.MAX_VALUE;
+    /** Whether the current narrowed search left out any option (set from the game threads). */
+    private final java.util.concurrent.atomic.AtomicBoolean narrowCut = new java.util.concurrent.atomic.AtomicBoolean();
+    /** The player narrowed in the search that found the line rootSearch returned (for replaying it), or -1. */
+    private int lineNarrow = -1;
+    private boolean firstPassOfLimit;
+    /** Whether the transposition table holds values from a narrowed search. */
+    private boolean tableNarrowed;
     private long deadline;
 
     // Read by other threads through progress(); only the solving thread writes them.
@@ -285,6 +368,7 @@ public final class Solver {
         deadline = start + options.timeBudget().toNanos();
         Line best = null;
         int bestLimit = 0;
+        int bestNarrow = -1;
         boolean complete = false;
         int cap = options.maxTurns() * EXTEND_FACTOR;
         for (int limit = Math.min(options.firstTurnLimit(), options.maxTurns()); ; limit = nextLimit(limit, cap)) {
@@ -300,6 +384,7 @@ public final class Solver {
             if (limit <= options.maxTurns() || decisive) {
                 best = line;
                 bestLimit = limit;
+                bestNarrow = lineNarrow;
                 if (tree != null) {
                     tree.keep(limit);
                 }
@@ -314,13 +399,18 @@ public final class Solver {
             }
         }
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+        GameResult.Bound bound = complete || sawChanceEver ? GameResult.Bound.UNKNOWN
+                : bCantWin && !aCantWin ? GameResult.Bound.A_CANT_LOSE
+                : aCantWin && !bCantWin ? GameResult.Bound.B_CANT_LOSE
+                : GameResult.Bound.UNKNOWN;
         if (best == null || (cancelled && !complete)) {
             String why = cancelled ? "(search stopped)" : "(search budget exhausted before any result)";
-            return new GameResult(0, 1, 0, 0, false, List.of(why), nodes, elapsed);
+            return new GameResult(0, 1, 0, 0, false, List.of(why), nodes, elapsed, bound);
         }
         pass = "replaying the optimal line";
+        attempt(bestNarrow, Long.MAX_VALUE, Long.MAX_VALUE); // replay it as it was searched
         return new GameResult(best.pWin(), best.pDraw(), best.pLoss(), bestLimit, complete,
-                principalVariation(best.pv(), bestLimit), nodes, elapsed);
+                principalVariation(best.pv(), bestLimit), nodes, elapsed, bound);
     }
 
     /**
@@ -332,32 +422,136 @@ public final class Solver {
      */
     private Line rootSearch(int limit) {
         table.clear();
+        tableNarrowed = false;
         path.clear();
         sawChance = false;
         limitHit = false;
+        firstPassOfLimit = true;
         turnLimit = limit;
-        Line aWins = rootPass("can A force a win?", limit, 0, 1, true);
+        // A refuted question that never ran into the limit proves that side can't force a win at
+        // all (at the cap, the limit counts as final, as for `complete`).
+        boolean finalLimit = limit >= options.maxTurns() * EXTEND_FACTOR;
+        Answer a = ask(0, limit);
+        sawChanceEver |= sawChance;
         if (!sawChance) {
-            if (aWins.value() >= 1) {
-                return aWins;
+            if (a.win()) {
+                lineNarrow = a.narrowed();
+                return a.line();
             }
-            Line bWins = rootPass("can B force a win?", limit, -1, 0, false);
-            if (bWins.value() <= -1) {
-                return bWins;
+            aCantWin |= !a.hit() || finalLimit;
+            Answer b = ask(1, limit);
+            sawChanceEver |= sawChance;
+            limitHit = a.hit() || b.hit(); // `complete` needs both answers clear of the limit
+            if (b.win()) {
+                lineNarrow = b.narrowed();
+                return b.line();
+            }
+            if (!sawChance) {
+                bCantWin |= !b.hit() || finalLimit;
             }
             // Neither side can force a win. Show the line where B holds A to a draw.
-            return new Line(0, 0, 1, 0, aWins.pv());
+            lineNarrow = a.narrowed();
+            return new Line(0, 0, 1, 0, a.line().pv());
         }
+        lineNarrow = -1;
+        attempt(-1, Long.MAX_VALUE, Long.MAX_VALUE);
         table.clear();
-        return rootPass("expected result (random events)", limit, -1, 1, false);
+        return rootPass("expected result (random events)", limit, -1, 1);
+    }
+
+    /**
+     * The answer to "can X force a win?" at this turn limit (x = 0 for A, 1 for B).
+     *
+     * @param line     the searched line (a win for X, or the line where the other side holds)
+     * @param hit      whether the search that settled it had a game end at the turn limit
+     * @param narrowed the player whose options were narrowed in that search, or -1
+     */
+    private record Answer(Line line, boolean win, boolean hit, int narrowed, boolean exact) {
+    }
+
+    /**
+     * Narrowed searches first (see {@link Options#narrowing}): with the opponent narrowed, X not
+     * winning is proof that X can't; with X narrowed, X winning is proof that X can. Each may use
+     * {@link #NARROW_SHARE} of the remaining budget. If neither settles it, the full search does.
+     */
+    private Answer ask(int x, int limit) {
+        String question = x == 0 ? "can A force a win?" : "can B force a win?";
+        double alpha = x == 0 ? 0 : -1, beta = x == 0 ? 1 : 0;
+        if (options.narrowing() && !options.exhaustive()) {
+            Answer hold = narrowed(question + " (" + side(1 - x) + " narrowed)", 1 - x, x, limit, alpha, beta);
+            if (sawChance) {
+                return hold; // random events: expectimax decides, unnarrowed
+            }
+            if (hold != null && (!hold.win() || hold.exact())) {
+                return hold;
+            }
+            Answer force = narrowed(question + " (" + side(x) + " narrowed)", x, x, limit, alpha, beta);
+            if (sawChance) {
+                return force;
+            }
+            if (force != null && (force.win() || force.exact())) {
+                return force;
+            }
+        }
+        attempt(-1, Long.MAX_VALUE, Long.MAX_VALUE);
+        if (tableNarrowed) {
+            table.clear(); // a narrowed search's values don't hold here (a full pass's do, for the next one)
+            tableNarrowed = false;
+        }
+        limitHit = false;
+        Line line = rootPass(question, limit, alpha, beta);
+        return new Answer(line, wins(x, line), limitHit, -1, true);
+    }
+
+    /** One narrowed search, or null if it used up its share of the budget first. */
+    private Answer narrowed(String name, int narrow, int x, int limit, double alpha, double beta) {
+        long now = System.nanoTime();
+        long nodeShare = (long) ((options.nodeBudget() - nodes) * NARROW_SHARE);
+        long timeShare = (long) ((deadline - now) * NARROW_SHARE);
+        attempt(narrow, nodes + Math.max(1, nodeShare), now + Math.max(1, timeShare));
+        table.clear(); // values found with one side narrowed only hold for that search
+        tableNarrowed = true;
+        limitHit = false;
+        narrowCut.set(false);
+        try {
+            Line line = rootPass(name, limit, alpha, beta);
+            // if no option was left out, this was the full search: its answer holds either way
+            return new Answer(line, wins(x, line), limitHit, narrow, !narrowCut.get());
+        } catch (AttemptExceeded e) {
+            return null;
+        } finally {
+            attempt(-1, Long.MAX_VALUE, Long.MAX_VALUE);
+        }
+    }
+
+    private static boolean wins(int x, Line line) {
+        return x == 0 ? line.value() >= 1 : line.value() <= -1;
+    }
+
+    private static String side(int player) {
+        return player == 0 ? "A" : "B";
+    }
+
+    /** Sets the narrowed player for the searches that follow, and their own node and time limit. */
+    private void attempt(int narrow, long nodeCap, long deadlineNanos) {
+        narrowPlayer = narrow;
+        attemptNodes = nodeCap;
+        attemptDeadline = deadlineNanos;
+    }
+
+    /** A tape for replaying {@code steps} in the current search (narrowed like it). */
+    private DecisionTape tape(Step[] steps, int limit) {
+        DecisionTape t = new DecisionTape(steps, limit);
+        return narrowPlayer >= 0 ? t.narrow(narrowPlayer, NARROW_WIDTH, narrowCut) : t;
     }
 
     /** One search from the start of the game, recorded as a pass of the tree if there is one. */
-    private Line rootPass(String name, int limit, double alpha, double beta, boolean firstOfLimit) {
+    private Line rootPass(String name, int limit, double alpha, double beta) {
         pass = name;
         if (tree != null) {
-            tree.startPass(firstOfLimit);
+            tree.startPass(firstPassOfLimit);
         }
+        firstPassOfLimit = false;
         Line result = search(new Step[0], limit, alpha, beta, null);
         if (tree != null) {
             tree.endPass(name, lastNode);
@@ -374,11 +568,15 @@ public final class Solver {
         try {
             long n = nodes + 1;
             nodes = n;
-            if (n > options.nodeBudget() || System.nanoTime() > deadline || cancelled) {
+            long now = System.nanoTime();
+            if (n > options.nodeBudget() || now > deadline || cancelled) {
                 throw new BudgetExceeded();
             }
+            if (n > attemptNodes || now > attemptDeadline) {
+                throw new AttemptExceeded();
+            }
             if (outcome == null) {
-                outcome = runner.start(new DecisionTape(steps, limit));
+                outcome = runner.start(tape(steps, limit));
             }
             lastNode = null;
             if (outcome.isTerminal()) {
@@ -559,7 +757,8 @@ public final class Solver {
         Outcome outcome;
         Set<String> seen = new HashSet<>();
         while (true) {
-            outcome = runner.run(new DecisionTape(choices, new int[choices.length], limit));
+            DecisionTape t = new DecisionTape(choices, new int[choices.length], limit);
+            outcome = runner.run(narrowPlayer >= 0 ? t.narrow(narrowPlayer, NARROW_WIDTH, null) : t);
             if (outcome.isTerminal() || key(outcome.branch()) == null) {
                 break;
             }

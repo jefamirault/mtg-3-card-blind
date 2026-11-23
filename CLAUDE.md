@@ -15,7 +15,9 @@ it safely.
   `lib/`): `java -Xss512m -Dtcb.forgeGuiDir=$PWD/forge/forge-gui -cp
   "web/target/classes:core/target/classes:web/target/lib/*" tcb.web.WebServer --port 8099
   --entries <scratch> --history <scratch> --no-cache`.
-- Tests: `mise exec -- mvn -B -o test -pl core` (about 4 minutes; `ReductionsTest` is most of it).
+- Tests: `mise exec -- mvn -B -o test -pl core` (about 5 minutes; `ReductionsTest` is most of it).
+  Long exhaustive comparisons are `@Tag("slow")` and run only with `-Pslow`: keep the default run
+  short, and tag a new test slow if it takes minutes.
   Run one class with `-Dtest=AiDecisionsTest`. With a fresh `~/.m2`, run it once without `-o`:
   `build.sh` skips tests, so it never fetches the surefire JUnit provider. If mise says the config
   isn't trusted (after moving the checkout), the user runs `mise trust` on `mise.toml`.

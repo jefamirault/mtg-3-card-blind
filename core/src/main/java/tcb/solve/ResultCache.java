@@ -99,7 +99,8 @@ public final class ResultCache {
             r.getAsJsonArray("line").forEach(e -> line.add(e.getAsString()));
             return new GameResult(r.get("pWin").getAsDouble(), r.get("pDraw").getAsDouble(), r.get("pLoss").getAsDouble(),
                     r.get("provenTurnLimit").getAsInt(), complete, List.copyOf(line), r.get("nodes").getAsLong(),
-                    Duration.ofMillis(Math.round(r.get("seconds").getAsDouble() * 1000)));
+                    Duration.ofMillis(Math.round(r.get("seconds").getAsDouble() * 1000)),
+                    r.has("bound") ? GameResult.Bound.valueOf(r.get("bound").getAsString()) : GameResult.Bound.UNKNOWN);
         } catch (IOException | RuntimeException e) {
             // Unreadable or from an older format: solve the game again (and overwrite the file).
             return null;
@@ -121,6 +122,9 @@ public final class ResultCache {
         r.put("pLoss", result.pLoss());
         r.put("provenTurnLimit", result.provenTurnLimit());
         r.put("complete", result.complete());
+        if (result.bound() != GameResult.Bound.UNKNOWN) {
+            r.put("bound", result.bound().name());
+        }
         r.put("nodes", result.nodes());
         r.put("seconds", result.elapsed().toMillis() / 1000.0);
         r.put("line", result.principalVariation());

@@ -2139,7 +2139,9 @@ function renderResults(r, treesId = null, replayId = null) {
         el("span", {}, `${g.a} vs ${g.b}, ${g.onThePlay} on the play:`),
         el("span", { class: "verdict " + cls }, verdict),
         g.complete ? null : el("span", { class: "unproven" },
-          noLine ? "no result" : `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`),
+          (noLine ? "no result" : `proven only to turn ${g.provenTurns ?? Math.floor(g.provenTurnLimit / 2)}`)
+          // what the search proved anyway: one side can't lose (the other's win was refuted)
+          + (g.cantLose ? `; ${g.cantLose === "a" ? g.a : g.b} can't lose` : "")),
         g.cached ? el("span", { class: "cached", title: "Solved in an earlier tournament" }, "cached") : null),
       el("ol", { class: "line" }, ...steps),
       !replayId ? null : noLine

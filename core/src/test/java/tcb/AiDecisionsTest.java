@@ -78,8 +78,11 @@ class AiDecisionsTest {
 
     @Test
     void openingHandActions() {
+        // Against a deck that can take the Leyline, keeping it in hand is searched too (otherwise
+        // the opening-hand rule always uses it).
         DeckList leyline = DeckList.of("leyline", "Leyline of Sanctity", "Plains", "Plains");
-        Branch b = walkTo(leyline, MEMNITES_ISLAND, "opening hand", AiDecisionsTest::first);
+        DeckList controlMagic = DeckList.of("control magic", "Island", "Island", "Control Magic");
+        Branch b = walkTo(leyline, controlMagic, "opening hand", AiDecisionsTest::first);
         assertEquals(List.of("From opening hand: Leyline of Sanctity", "From opening hand: nothing"), b.labels());
     }
 
@@ -143,6 +146,17 @@ class AiDecisionsTest {
         assertTrue(r.value() >= 0, "Shoal holds off the Lions: " + r.principalVariation());
         assertTrue(r.principalVariation().stream().anyMatch(l -> l.contains("Cast Sickening Shoal with X=4")),
                 r.principalVariation().toString());
+    }
+
+    @Test
+    void manaAbilitiesWithSideEffects() {
+        // Pristine Talisman ("Add {C}. You gain 1 life.") is worth tapping for the life alone, so it's
+        // offered at priority; plain mana sources (the Island) are tapped only to pay for something.
+        DeckList talisman = DeckList.of("talisman", "Black Lotus", "Pristine Talisman", "Island");
+        Branch b = walkTo(talisman, MEMNITES, "priority", script("Play Island", "Cast Black Lotus", "Cast Pristine Talisman"),
+                l -> l.startsWith("Activate Pristine Talisman"));
+        assertTrue(b.labels().stream().noneMatch(l -> l.startsWith("Activate Island") || l.startsWith("Activate Black Lotus")),
+                b.labels().toString());
     }
 
     // ---------------------------------------------------------------- helpers

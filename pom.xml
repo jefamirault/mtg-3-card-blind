@@ -22,7 +22,18 @@
         <!-- Version of the Forge modules installed by ./build.sh -->
         <forge.version>2.0.17-SNAPSHOT</forge.version>
         <junit.version>5.11.3</junit.version>
+        <!-- Tests tagged @Tag("slow") (long exhaustive comparisons) run only with -Pslow -->
+        <tcb.excludedGroups>slow</tcb.excludedGroups>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>slow</id>
+            <properties>
+                <tcb.excludedGroups>none</tcb.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
 
     <dependencyManagement>
         <dependencies>
@@ -63,6 +74,7 @@
                         </systemPropertyVariables>
                         <!-- Forge calls System.gc() after every finished game; with parallel solvers that stalls them all -->
                         <argLine>-Xss512m -Xmx8g -XX:+DisableExplicitGC</argLine>
+                        <excludedGroups>${tcb.excludedGroups}</excludedGroups>
                     </configuration>
                 </plugin>
             </plugins>
