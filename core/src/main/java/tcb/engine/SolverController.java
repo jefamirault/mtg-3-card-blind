@@ -60,7 +60,7 @@ public class SolverController extends PlayerControllerAi {
 
     private final DecisionTape tape;
     private final int startingPlayer;
-    /** Don't merge interchangeable options or skip repeated windows (for checking those reductions). */
+    /** Don't merge interchangeable options or skip declining opening-hand actions (for checking those reductions). */
     private final boolean exhaustive;
 
     public SolverController(Game game, Player player, forge.LobbyPlayer lobbyPlayer, DecisionTape tape, int startingPlayer,
@@ -245,10 +245,6 @@ public class SolverController extends PlayerControllerAi {
         if (game.getPhaseHandler().is(PhaseType.MAIN1, player) && game.getStack().isEmpty() && tape.checkpointDue(turn)) {
             tape.checkpoint(position("checkpoint", List.of()));
         }
-        PhaseType previous = tape.notePriority(turn, game.getPhaseHandler().getPhase());
-        if (!exhaustive && game.getStack().isEmpty() && repeatsEarlierWindow(previous)) {
-            return null;
-        }
         if (tape.replaysPass(me())) {
             return null;
         }
@@ -352,27 +348,6 @@ public class SolverController extends PlayerControllerAi {
             }
         }
         return false;
-    }
-
-    /**
-     * True for priority windows that offer nothing the previous window in the turn didn't, so
-     * both players pass without branching:
-     * <ul>
-     * <li>the draw step when nobody drew (the library was empty): it's the upkeep again;</li>
-     * <li>the end of combat step right after the combat damage step: nothing happens in
-     *     between (end-of-combat triggers would be on the stack, and creatures stay in combat
-     *     until the step ends).</li>
-     * </ul>
-     * Anything done here could have been done, with the same result, in that earlier window.
-     */
-    private boolean repeatsEarlierWindow(PhaseType previous) {
-        Game game = getGame();
-        PhaseType phase = game.getPhaseHandler().getPhase();
-        if (phase == PhaseType.DRAW) {
-            return previous == PhaseType.UPKEEP
-                    && game.getPlayers().stream().allMatch(p -> p.numDrawnThisDrawStep() == 0);
-        }
-        return phase == PhaseType.COMBAT_END && previous == PhaseType.COMBAT_DAMAGE;
     }
 
     /**

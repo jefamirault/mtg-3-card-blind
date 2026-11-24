@@ -35,15 +35,18 @@ code. Rules that were tried and dropped go under *Rejected*, with their numbers.
   that matters isn't in `state`, merging becomes unsound. The fix is to add the property, or to
   treat the card as referenced.
 
-### R2. Repeated priority windows are skipped
+### R2. (Removed) Skipping repeated priority windows
 
-- **Where:** `SolverController.repeatsEarlierWindow`, checked only when the stack is empty.
-- **Rule:** Nobody gets priority:
-  - in the **draw step** when it comes right after upkeep and no player drew (empty library, since
-    patch 0001 removes decking): it's the upkeep again;
-  - in the **end of combat step** right after the combat damage step.
-- **Gives up:** nothing. Anything done there could be done with the same result in the window
-  before.
+**Policy: no priority window is ever skipped.** Every window Forge gives priority in is offered
+to the solver, even one that looks like a repeat of the window before. `ReductionsTest.noPriorityWindowIsSkipped`
+checks this with Desert.
+
+R2 used to skip the draw step when nobody drew, and the end of combat step right after combat
+damage, on the grounds that they offered nothing the step before didn't. Desert proved that wrong:
+its damage ability works only in the end of combat step, so its main use (finishing off an attacker
+that survived combat damage) was never searched. Removed 2026-11-24.
+
+Forge itself withholds priority in a few windows (see *Windows Forge doesn't give priority in*).
 
 ### R3. Mana abilities only when they do more than make mana (Sid's rule)
 
@@ -105,6 +108,21 @@ to enumerate.
 
 - **Where:** `DecisionTape.decide`.
 - **Rule:** It's counted (for ordinals) but returns at once and never reaches the search.
+
+## Windows Forge doesn't give priority in
+
+These come from Forge's `PhaseHandler`, not from the solver, and all follow the rules:
+
+- The untap step; cleanup (unless something happens there); the first player's draw step on
+  turn 1; the declare blockers and damage steps when nobody attacks; the first-strike damage step
+  when no creature has first or double strike.
+- The declare attackers step always gives priority, whatever the attackers' total power, and even
+  with no attack (Forge only checks that the combat phase is running).
+  `ReductionsTest.zeroPowerAttackGivesPriority` checks a 0-power attack.
+- Stock Forge also gave no priority in a combat damage step with no combat damage to assign (every
+  combatant at 0 power, or all of them first strikers already done). The rules give priority there
+  (CR 510.3), so patch 0006 restores that window. `ReductionsTest.combatDamageStepWithoutDamageGivesPriority`
+  and `zeroPowerAttackGivesPriority` check it.
 
 ## Search techniques
 
@@ -188,6 +206,8 @@ to enumerate.
 
 ## Rejected
 
+- **R2, skipping repeated priority windows:** missed Desert's end of combat ability. No window is
+  skipped now (see R2).
 - **Killer moves** (try the option that last caused a cutoff at the same depth): searched 2–3× more
   nodes. Decision depths don't line up across lines.
 

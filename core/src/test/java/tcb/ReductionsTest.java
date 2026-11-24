@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -12,14 +14,14 @@ import tcb.deck.DeckList;
 import tcb.engine.DecisionTape;
 import tcb.engine.GameRunner;
 import tcb.engine.GameRunner.Outcome;
+import tcb.engine.Signals;
 import tcb.solve.Solver;
 import tcb.solve.Solver.GameResult;
 import tcb.solve.Solver.Options;
 
 /**
- * The branching reductions (merging options that only swap identical cards, skipping priority
- * windows that repeat earlier ones, always taking opening-hand actions) must not change these
- * results: compare with exhaustive search.
+ * The branching reductions (merging options that only swap identical cards, always taking
+ * opening-hand actions) must not change these results: compare with exhaustive search.
  */
 class ReductionsTest {
     private static final DeckList MEMNITES = DeckList.of("memnites", "Memnite", "Memnite", "Memnite");
@@ -74,9 +76,59 @@ class ReductionsTest {
     }
 
     @Test
-    void skippedDrawAndEndOfCombatWindows() {
-        // Swords can be cast in any window; the skipped ones repeat the upkeep and damage step.
+    void instantsInEveryWindow() {
+        // Swords can be cast in any window.
         sameResult(GUIDE, SWORDS);
+    }
+
+    @Test
+    void noPriorityWindowIsSkipped() {
+        // Desert's damage ability works only in the end of combat step, which comes right after
+        // combat damage: that window must still be offered.
+        DeckList deserts = DeckList.of("deserts", "Desert", "Desert", "Desert");
+        assertOffered(MEMNITES, deserts, b -> b.labels().stream()
+                .anyMatch(l -> l.startsWith("Activate Desert") && l.contains("damage")));
+    }
+
+    @Test
+    void combatDamageStepWithoutDamageGivesPriority() {
+        // Only a first striker fights, so nothing deals damage in the regular combat damage step.
+        // Players still get priority there (CR 510.3; patch 0006).
+        DeckList knight = DeckList.of("knight", "Plains", "Plains", "Youthful Knight");
+        assertOffered(knight, SWORDS, b -> b.position() != null && b.position().contains("|phase=COMBAT_DAMAGE|"));
+    }
+
+    @Test
+    void zeroPowerAttackGivesPriority() {
+        // An Ornithopter (0/2) attack: priority in the declare attackers step, and in the combat
+        // damage step though nothing deals damage (patch 0006).
+        DeckList thopter = DeckList.of("thopter", "Plains", "Plains", "Ornithopter");
+        assertOffered(thopter, SWORDS, b -> b.player() == 1 && b.position() != null
+                && b.position().contains("|phase=COMBAT_DECLARE_ATTACKERS|"));
+        assertOffered(thopter, SWORDS, b -> b.player() == 1 && b.position() != null
+                && b.position().contains("|phase=COMBAT_DAMAGE|"));
+    }
+
+    /**
+     * Plays a game, acting first (lands, spells, the biggest attack) but passing once only
+     * activations are left, until a priority decision matching {@code wanted} is offered.
+     */
+    private static void assertOffered(DeckList a, DeckList b, java.util.function.Predicate<Signals.Branch> wanted) {
+        GameRunner runner = new GameRunner(a, b, 0, false);
+        List<DecisionTape.Step> steps = new ArrayList<>();
+        for (int n = 0; n < 300; n++) {
+            Outcome o = runner.run(new DecisionTape(steps.toArray(new DecisionTape.Step[0]), 12));
+            Signals.Branch br = o.branch();
+            assertTrue(br != null, "game ended before the window was offered");
+            boolean priority = "priority".equals(br.kind());
+            if (priority && wanted.test(br)) {
+                return;
+            }
+            String first = br.labels().get(0);
+            boolean act = !priority || first.startsWith("Play") || (br.player() == 0 && first.startsWith("Cast"));
+            steps.add(br.step(act ? 0 : br.labels().size() - 1));
+        }
+        throw new AssertionError("the window was never offered");
     }
 
     @Test

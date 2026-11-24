@@ -42,8 +42,8 @@ public final class Solver {
      *                       alone. Turn-free keys merge "do it now" with "do it a turn later",
      *                       which is much faster, but can misjudge games decided near the limit.
      * @param exhaustive     branch on every option: don't merge options that only swap identical
-     *                       cards, and don't skip priority windows that repeat earlier ones. Slower;
-     *                       for checking that those reductions don't change results.
+     *                       cards, and search declining opening-hand actions. Slower; for checking
+     *                       that those reductions don't change results.
      * @param narrowing      before each full "can X force a win?" search, try to settle it with one
      *                       side's options narrowed (see {@link #NARROW_WIDTH}): with X's opponent
      *                       narrowed, a failure to win still proves X can't; with X narrowed, a win

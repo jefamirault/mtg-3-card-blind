@@ -158,7 +158,7 @@ Search options shared by `solve` and `tournament`:
 | `--time` | 10m | Time per game before giving up |
 | `--first-turns` | off | Iteratively deepen the turn limit from here (doubling), so a game that runs out of budget still has a result proven to a shorter limit |
 | `--exact-turns` | off | Turn-aware transposition table (see limitations) |
-| `--exhaustive` | off | Branch on every option: don't merge options that only swap identical cards, or skip repeated priority windows (slower; for checking results) |
+| `--exhaustive` | off | Branch on every option: don't merge options that only swap identical cards, or skip declining opening-hand actions (slower; for checking results) |
 | `--threads` | CPUs | Games solved in parallel (`tournament` only) |
 
 Results that hit the budget are marked "unproven beyond turn N". A game whose replays stop being
@@ -227,8 +227,8 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
 - **Fewer branches.** (Every rule, exactly: [docs/search-rules.md](docs/search-rules.md).) Options that differ only in which of several identical cards they use
   (which Memnite attacks, which identical creature a removal spell hits) are one option. A card
   that anything refers to (attachments, remembered cards, targets on the stack, ...) is never
-  merged. The draw step when nobody drew, and the end of combat step right after combat damage,
-  offer nothing the step before didn't, so nobody acts there.
+  merged. Every priority window is offered: none is skipped, even one that looks like a repeat
+  of the step before (Desert works only in the end of combat step).
 - **Mana abilities (Sid's rule).** Tapping a permanent for mana that then goes unspent gains
   nothing, unless the ability also does something else. So a mana ability is offered at a
   priority stop only if it puts a counter on its own permanent, deals damage, has a life payment
@@ -278,6 +278,9 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   5. the AI's forced-attacker check runs in order on the game thread instead of on a thread pool
      with a timeout, so the attack the AI falls back to (more than 64 possible assignments) is the
      same on every replay.
+  6. players get priority in the combat damage step even when no combat damage is dealt (CR
+     510.3). Stock Forge skips that window, for example after a first-strike damage step in which
+     every combatant had first strike.
 
   The solver also sets each game's `AI_TIMEOUT` to a day, so the decisions left to Forge's AI
   never stop at its wall-clock deadline and depend on machine load.

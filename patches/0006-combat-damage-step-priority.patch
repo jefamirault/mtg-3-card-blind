@@ -1,0 +1,16 @@
+diff --git a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+index 1920626861d..fbfa24aadf3 100644
+--- a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
++++ b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+@@ -421,9 +421,8 @@ public class PhaseHandler implements IHasForgeLog {
+                         game.updateCombatForView();
+                     }
+ 
+-                    if (!combat.assignCombatDamage(false)) {
+-                        givePriorityToPlayer = false;
+-                    } else {
++                    // CR 510.3: players get priority in the combat damage step even if no damage was dealt
++                    if (combat.assignCombatDamage(false)) {
+                         combat.dealAssignedDamage();
+                     }
+                     break;
