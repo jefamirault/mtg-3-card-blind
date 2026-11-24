@@ -69,6 +69,8 @@ it safely.
 
 ## Invariants the solver depends on
 
+- `docs/search-rules.md` lists every reduction and search technique with an id. Update it in the
+  same commit as any change to one, and add tried-and-dropped ideas under *Rejected*.
 - **Replays are deterministic.** The same tape must give the same game, whether it's replayed,
   continued from a paused game, or replayed with the "Pass" shortcut. `DeterminismTest` checks all
   three. Run it after any controller or engine change.

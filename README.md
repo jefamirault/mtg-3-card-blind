@@ -224,7 +224,7 @@ submodule pinned to a fixed commit and has scripts for nearly every Magic card.
   An unexplored decision stops the game with a signal, so the search can expand it.
 - **Random events** pass through a replaceable random source (`ChanceRandom`). While a spell or
   ability resolves, each random draw becomes a chance node.
-- **Fewer branches.** Options that differ only in which of several identical cards they use
+- **Fewer branches.** (Every rule, exactly: [docs/search-rules.md](docs/search-rules.md).) Options that differ only in which of several identical cards they use
   (which Memnite attacks, which identical creature a removal spell hits) are one option. A card
   that anything refers to (attachments, remembered cards, targets on the stack, ...) is never
   merged. The draw step when nobody drew, and the end of combat step right after combat damage,
